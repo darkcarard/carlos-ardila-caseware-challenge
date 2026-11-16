@@ -5,7 +5,7 @@
 | Run | Mutants | Killed | Score |
 | --- | --- | --- | --- |
 | First measurement (end of step 4) | 414 | 325 | 79% |
-| After triage | 398 | 379 | **95%** |
+| After triage and the lost-item invariant | 408 | 389 | **95%** |
 
 Deleting `FanoutResilienceTest` drops the score to 91% and fails the build, so the gate catches lost tests.
 
@@ -23,6 +23,8 @@ Of the 89 first-run survivors, 70 are gone. Most were killed by new tests; the r
 - **Dispatcher behaviour while the probe is in flight.** The dispatcher must wait for the probe's verdict, not busy-spin on the breaker or defer the rest. A wrapper breaker flags any re-ask that happens before a verdict.
 - **Row-level checks:** checkpoint cadence (no double checkpoint at the end of a chunk), no empty summary batches, each flush publishes only new pairs, repair of a drifted target at the current epoch, and per-item retry jitter (no thundering herd).
 - **Metrics:** counters carry the chunk correlation fields.
+
+**Follow-up hardening.** The lost-item survivor showed that a dispatcher bug would drop an item silently in production, even though the test now protects the code. `run()` now checks that every submitted item has exactly one outcome. Any missing item emits `invariant.violation` (`backfill.item.lost`, which pages) and comes back as `Deferred` with no attempt consumed, so it is re-delivered instead of never being seeded. With the bug re-injected, the suite fails with `backfill dispatcher lost 1 item(s)`.
 
 **(c) Dead or redundant code: removed or simplified.**
 

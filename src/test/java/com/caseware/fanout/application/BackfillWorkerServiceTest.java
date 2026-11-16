@@ -414,6 +414,57 @@ class BackfillWorkerServiceTest {
         }
     }
 
+    /**
+     * The dispatcher cannot be made to drop an item without a bug, so the safety net is tested
+     * directly: it is what turns such a bug into a page instead of an engagement that never seeds.
+     */
+    @Nested
+    class LostItemInvariant {
+
+        private final BackfillFixture f = new BackfillFixture(FakeDownstreamClient.instant());
+        private final List<BackfillItem> items = items(FIRM, 3);
+
+        @Test
+        void holdsWhenEveryItemHasAnOutcome() {
+            List<LoadOutcome> outcomes = items.stream().<LoadOutcome>map(LoadOutcome.Aborted::new).toList();
+
+            assertThat(f.service().accountForEveryItem(items, outcomes)).isEmpty();
+            assertThat(f.metrics.violations()).isEmpty();
+        }
+
+        @Test
+        void aDroppedItemPagesAndIsDeferredForRedelivery() {
+            List<LoadOutcome> outcomes = List.of(new LoadOutcome.Aborted(items.get(0)), new LoadOutcome.Aborted(items.get(2)));
+
+            List<LoadOutcome> recovered = f.service().accountForEveryItem(items, outcomes);
+
+            assertThat(recovered).singleElement().isInstanceOfSatisfying(LoadOutcome.Deferred.class, d -> {
+                assertThat(d.item()).isEqualTo(items.get(1));
+                assertThat(d.next()).isEqualTo(items.get(1)); // no attempt consumed
+                assertThat(d.retryAt()).isEqualTo(T0);
+            });
+            assertThat(f.metrics.violations()).containsExactly("backfill.item.lost");
+        }
+
+        @Test
+        void duplicateSubmissionsAreCountedOneByOne() {
+            BackfillItem twice = items.getFirst();
+
+            List<LoadOutcome> recovered = f.service().accountForEveryItem(List.of(twice, twice),
+                    List.of(new LoadOutcome.Aborted(twice)));
+
+            assertThat(recovered).extracting(LoadOutcome::item).containsExactly(twice);
+        }
+
+        @Test
+        void aNormalRunAccountsForEveryItem() throws InterruptedException {
+            BackfillReport report = f.service().run(items(FIRM, 25));
+
+            assertThat(report.outcomes()).hasSize(25);
+            assertThat(f.metrics.violations()).isEmpty();
+        }
+    }
+
     @Test
     void reconciliationUsesItsOwnProvenance() throws InterruptedException {
         BackfillFixture f = new BackfillFixture(FakeDownstreamClient.instant());

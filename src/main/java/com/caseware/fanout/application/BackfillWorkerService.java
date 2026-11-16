@@ -138,7 +138,35 @@ public final class BackfillWorkerService {
                 throw e;
             }
         }
+        List<LoadOutcome> lost = accountForEveryItem(items, outcomes);
+        outcomes.addAll(lost);
+        assert lost.isEmpty() : "backfill dispatcher lost " + lost.size() + " item(s)";
         return new BackfillReport(outcomes);
+    }
+
+    /**
+     * Hard invariant: every submitted item ends in exactly one outcome. An item the dispatcher
+     * dropped (a scheduling bug) must never vanish silently, because nothing would ever re-deliver
+     * it and its engagement would stay unseeded. Each missing item pages through
+     * {@code invariant.violation} and comes back as {@link LoadOutcome.Deferred} with no attempt
+     * consumed, so the caller re-delivers it.
+     *
+     * @return the recovery outcomes for the missing items; empty when the invariant holds
+     */
+    List<LoadOutcome> accountForEveryItem(Collection<BackfillItem> items, List<LoadOutcome> outcomes) {
+        Map<BackfillItem, Integer> unaccounted = new LinkedHashMap<>();
+        items.forEach(item -> unaccounted.merge(item, 1, Integer::sum));
+        outcomes.forEach(outcome -> unaccounted.computeIfPresent(outcome.item(), (k, n) -> n - 1)); // 0 = accounted for
+
+        List<LoadOutcome> recovered = new ArrayList<>();
+        unaccounted.forEach((item, missing) -> {
+            for (int i = 0; i < missing; i++) {
+                metrics.invariantViolation("backfill.item.lost", TelemetryContext.forFirm(item.firmId()));
+                recovered.add(new LoadOutcome.Deferred(item, item, clock.instant(),
+                        "lost by the dispatcher (invariant violation); re-deliver"));
+            }
+        });
+        return recovered;
     }
 
     /** Returns true if a load was started. */

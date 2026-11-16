@@ -198,7 +198,7 @@
               <!-- Concurrency tests are bounded by assertTimeoutPreemptively; a mutant that
                    deadlocks the dispatcher is reported as TIMED_OUT, which counts as detected. -->
               <timeoutConstant>8000</timeoutConstant>
-              <!-- Measured 95% (379/398); every survivor is triaged in docs/2-mutation-testing.md. -->
+              <!-- Measured 95% (389/408); every survivor is triaged in docs/2-mutation-testing.md. -->
               <mutationThreshold>92</mutationThreshold>
               <coverageThreshold>95</coverageThreshold>
             </configuration>
