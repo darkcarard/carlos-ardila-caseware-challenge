@@ -20,7 +20,8 @@ When a product template is `published` or `withdrawn` globally, regional workers
 ```text
 ├── CLAUDE.md
 ├── README.md                          # Concise architectural & implementation tradeoffs (< 1 page)
-├── pom.xml                            # Java 21, JUnit 5, AssertJ, Mockito, AWS SDK v2 (interfaces/models)
+├── pom.xml                            # Java 21, JUnit 5, AssertJ, Mockito, jqwik; JaCoCo floors; PIT in -Pmutation (no AWS SDK)
+├── docs/                              # 0 challenge, 1 design, 2 implementation plan, 3 mutation-testing triage
 ├── .claude/
 │   └── rules/
 │       ├── architecture-invariants.md # Residency, DynamoDB conditions, graph semantics, capacity caps
@@ -31,14 +32,15 @@ When a product template is `published` or `withdrawn` globally, regional workers
     │   ├── domain/
     │   │   ├── model/                 # Records: EngagementRecord, VersionNode, VersionGraph, FanoutChunk, SummaryPair
     │   │   ├── service/               # Pure functions: PendingTargetResolver, ChunkPlanner
-    │   │   └── port/                  # Interfaces: RegistryRepository, VersionGraphStore, DownstreamEngagementClient, SummaryWarmupPublisher, CapacityLimiter
+    │   │   ├── port/                  # Interfaces: RegistryRepository, VersionGraphStore, DownstreamEngagementClient, SummaryWarmupPublisher, CapacityLimiter, CircuitBreaker, FanoutMetrics (telemetry + invariant.violation)
+    │   │   └── error/                 # Sealed FanoutException: Transient / OptimisticLockConflict / NonRetryableData
     │   ├── application/
     │   │   ├── FanoutChunkProcessor.java      # Orchestrates chunk evaluation, checkpointing, conditional writes
     │   │   ├── BackfillWorkerService.java     # Demonstrates ~1m downstream load with global/per-firm caps & circuit breaker
-    │   │   └── FanoutResult.java              # Sealed outcome hierarchy (Completed, PartialRetry, Throttled, PoisonMessage)
+    │   │   ├── FanoutResult.java              # Sealed outcome hierarchy (Completed, PartialRetry, Throttled, PoisonMessage)
+    │   │   └── RetryPolicy.java               # Exponential backoff with deterministic jitter (computes delays, never sleeps)
     │   └── infrastructure/
-    │       ├── resilience/            # TokenBucket/Semaphore CapacityLimiter, CircuitBreaker, RetryPolicy
-    │       └── observability/         # Structured telemetry & hard-invariant assertions
+    │       └── resilience/            # FairCapacityLimiter (per-firm then global semaphores), ClockedCircuitBreaker
     └── test/java/com/caseware/fanout/
         ├── domain/                    # Pure unit & property-based graph resolution tests
         ├── application/               # Concurrency, race conditions, idempotency, DLQ & cap enforcement tests
@@ -53,11 +55,13 @@ When a product template is `published` or `withdrawn` globally, regional workers
 ## 4. Build & Verification Commands
 - Compile & run all tests: `./mvnw test`
 - Run specific test suite: `./mvnw test -Dtest=FanoutChunkProcessorTest`
+- Tests + coverage floors: `./mvnw verify`
+- Mutation testing (slow, ~1 min): `./mvnw -Pmutation verify`
 
 ## 5. Implementation Priorities (Time-Boxed Scope)
 1. **Interfaces & Contracts over Boilerplate:** Define crisp ports (`RegistryRepository`, `DownstreamEngagementClient`, `CapacityLimiter`). Do NOT pull in heavy Spring Boot starters or real AWS network clients; use clean Java 21 + in-memory test doubles that faithfully enforce DynamoDB conditional expressions.
 2. **Purity in Domain:** `PendingTargetResolver` must be a 100% pure, deterministic function with zero I/O.
-3. **Explicit Race & Failure Handling:** Model `state_seq`, `graph_epoch`, per-`(publish_id, firm_id)` chunk cursors, partial batch failures, and circuit-breaking explicitly in types and tests.
+3. **Explicit Race & Failure Handling:** Model `state_seq`, `graph_epoch`, per-`(publish_id, firm_id, chunk_index)` cursors, partial batch failures, and circuit-breaking explicitly in types and tests.
 4. **README Tradeoffs:** Keep `README.md` sharp and opinionated, matching the Design Document's voice.
 
 ## 6. Hard Stop Rules for AI

@@ -13,9 +13,11 @@ This is the regional template-publish fan-out worker (Part 2), in plain Java 21.
 - **`FanoutChunkProcessor` (publish and withdraw).** It never calls the ~1-minute loader: its constructor does not accept one. Writes are conditional on `state_seq` and `graph_epoch`, and progress is checkpointed per (publish, firm, chunk), so a crash resumes where it stopped.
 - **`BackfillWorkerService` (backfill and reconciliation).** It is the only caller of the loader, capped at 10 loads per firm and 100 in total. Firms are served round-robin on virtual threads, behind a kill switch and a circuit breaker.
 
-## Deviations from `.claude/rules`
+## Where implementation corrected the original rules
 
-| Rule | What I did, and why |
+Implementation exposed four places where the original rules and design were wrong or underspecified. The fixes are now folded into [.claude/rules](.claude/rules) and the design document.
+
+| Original rule | What changed, and why |
 | --- | --- |
 | §3: backfill writes guard only `state_seq` | **They also guard `graph_epoch`.** A 1-minute load can straddle a withdrawal, and without the guard it re-offers the withdrawn version. On a failed condition the worker re-derives without reloading. |
 | §3: set `graph_epoch = incomingGraphEpoch` | **It stores the epoch of the graph snapshot used for the derivation**, not the chunk's. With the chunk's epoch, a stale worker re-offered a withdrawn v7. A surviving mutant exposed this. |

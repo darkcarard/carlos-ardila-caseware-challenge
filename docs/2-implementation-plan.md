@@ -23,12 +23,12 @@ This plan was agreed before any code was written. Each step ends with a green `.
 - Typed IDs: `FirmId`, `EngagementId`, `ProductId`, `Market`, `TemplateVersion`, `PublishId`, `LocaleCode`.
 - `EngagementRecord` carries the row invariants: `locked` implies no pending target, the target and `pending_since` travel together, and the target is never the base.
 - `VersionNode` and `VersionGraph`. A graph is validated on construction: one lineage, known parents, unique `graphSeq`, and acyclic (checked with Kahn's algorithm). Any violation throws `NonRetryableDataException`.
-- `FanoutChunk` (at most 500 ids), `ChunkKey`, `ChunkCursor`.
+- `FanoutChunk` (at most 500 ids, plus the triggering `templateVersion`, used for correlation only), `ChunkKey`, `ChunkCursor`.
 - `SummaryPair` has **exactly five fields**: product, market, from, to, locale.
 
 **`domain/port`.**
 - `RegistryRepository` exposes `get`, `conditionalFanoutWrite` and `conditionalBackfillWrite`. There is **no `save()`**, so every write carries its guards in its signature. Writes return the sealed `WriteOutcome { Applied, ConditionFailed(current) }`.
-- `VersionGraphStore`; `CheckpointStore`, whose `advance` is monotonic; `DownstreamEngagementClient`; `SummaryWarmupPublisher`, which accepts only `Set<SummaryPair>`; `CapacityLimiter`; `KillSwitch`; `FanoutMetrics` with `invariantViolation`; `TelemetryContext`; `CircuitBreaker`.
+- `VersionGraphStore`; `CheckpointStore`, whose `advance` is monotonic; `DownstreamEngagementClient`; `SummaryWarmupPublisher`, which accepts only `Set<SummaryPair>`; `CapacityLimiter`; `KillSwitch`; `FanoutMetrics` with `invariantViolation`; `TelemetryContext`, which carries the five correlation fields.
 
 **Errors.** A sealed `FanoutException` hierarchy:
 - `TransientInfrastructureException`, with registry-throttled, downstream-rate-limit and downstream-unavailable subtypes;
@@ -73,7 +73,7 @@ The constructor **does not accept a `DownstreamEngagementClient`**, so "zero loa
 
 The **epoch written is the graph snapshot's**, not the chunk's.
 
-`ClockedCircuitBreaker` is a CLOSED / OPEN / HALF_OPEN state machine. It runs on an injected `Clock` and admits a single probe while HALF_OPEN.
+The `CircuitBreaker` port and its `ClockedCircuitBreaker` implementation are added here. The breaker is a CLOSED / OPEN / HALF_OPEN state machine. It runs on an injected `Clock` and admits a single probe while HALF_OPEN.
 
 **Test doubles.**
 - `InMemoryRegistryRepository` applies the exact DynamoDB conditions atomically through `ConcurrentHashMap.compute`, and can inject throttling and races.

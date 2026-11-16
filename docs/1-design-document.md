@@ -64,7 +64,7 @@ Declining v5 records it in `declined_versions` and leaves `base_version` at v4, 
 - **Lifecycle.** `accepted` advances `base_version`, `finalized` locks the row so a signed-off file is never offered updates, `deleted` removes it, and a roll-forward inherits `base_version` from its source (Appendix F).
 - **Withdrawal.** Bump the graph epoch and re-run the same fan-out. Affected rows fall back to the previous version or stop being pending, and the notification is retracted. An already-applied version that is later withdrawn raises a separate advisory.
 - **Unreliable delivery.** Every write is conditional and derivation is pure, so duplicates, out-of-order events, retries and DLQ replays are no-ops. Hook writes require `state_seq < :incoming`. Fan-out writes require `state_seq = :seen AND graph_epoch <= :epoch`, so neither a user decision nor a newer graph epoch is ever overwritten. Race handling is in Appendix F.
-- **Failure recovery.** Chunked fan-out (one SQS message per at most 500 rows) with a per-`(publish, firm)` cursor, so the 40,000-row firm resumes from its last chunk. A circuit breaker on downstream 429/5xx and registry throttling stops workers from pulling. Poison chunks go to the DLQ and are replayed by runbook. Accepts (each a ~1 minute load) are queued under the same caps as the backfill.
+- **Failure recovery.** Chunked fan-out (one SQS message per at most 500 rows) with a cursor per `(publish, firm, chunk)` checkpointed every few dozen rows, so the 40,000-row firm resumes where it stopped. A circuit breaker on downstream 429/5xx and registry throttling stops workers from pulling. A corrupt row is quarantined and counted without failing its chunk; only a corrupt lineage poisons the chunk, which goes to the DLQ and is replayed by runbook. Accepts (each a ~1 minute load) are queued under the same caps as the backfill.
 - **Reconciliation.** A weekly 0.5% sample (about 4,000 loads, 67 compute-hours), evaluated over a rolling 8-week window so a 0.01% drift rate is statistically provable (Appendix F), plus a free check on every `loaded` event. Drift above threshold triggers a per-firm re-seed.
 - **Live migration, no maintenance window.** (1) Ship hooks dark. (2) Shadow mode: the registry fills from hooks and `loaded` events while the UI is unchanged. (3) Throttled backfill of the remaining rows, off-peak, with a kill switch. (4) Per-firm feature flag once coverage is 100% and a drift sample passes. Rollback is flipping the flag, because the registry is purely additive.
 
@@ -147,14 +147,14 @@ We alert on user-visible symptoms and hard invariants. Telemetry with firm or en
 | `declined_versions` (string set) | Versions the user already declined |
 | `state_seq` | Monotonic per-engagement counter from the engagement system, used in conditional writes |
 | `pending_target`, `pending_since` | Derived; absent when nothing is pending |
-| `graph_epoch` | Version-graph epoch the row was last evaluated against; fan-out writes require `graph_epoch <= :epoch` |
+| `graph_epoch` | Version-graph epoch the row was last evaluated against; fan-out and backfill writes require `graph_epoch <= :epoch` |
 | `locked` | Set by `finalized`; a locked row never gets a `pending_target` |
 | `source` | `hook`, `backfill` or `reconciled`, for provenance |
 
 - **GSI-1 (sparse):** `PK=firm_id`, `SK=pending_since`, projected only for rows with a `pending_target`. The dashboard query returns only pending items, 50 per page.
 - **GSI-2 (fan-out lookup):** `PK=product_id#market#shard(0..15)`, `SK=firm_id#engagement_id`. The shard suffix avoids a hot key.
 - **Coverage item:** `PK=firm_id`, `SK=#COVERAGE`, holding counts of seeded and unseeded engagements. It drives "Checking N files" and the backfill dashboard.
-- **Derivation:** `pending_target = latest PUBLISHED descendant of base_version in the market lineage, not in declined_versions` (none if the row is `locked`). Pure function of `(base_version, declined_versions, locked, graph)`, recomputed on every hook write and every fan-out.
+- **Derivation:** `pending_target = latest PUBLISHED descendant of base_version in the market lineage, not in declined_versions` (none if the row is `locked`). "Latest" is the highest `graph_seq`, and reachability ignores status, so a withdrawn version does not hide its descendants. Pure function of `(base_version, declined_versions, locked, graph)`, recomputed on every hook write and every fan-out.
 
 ### B. Cost and capacity arithmetic
 
@@ -263,12 +263,13 @@ Use multi-window burn-rate alerts (1 h and 6 h) for the latency, freshness and s
 | --- | --- | --- |
 | Hook | `attribute_not_exists(state_seq) OR state_seq < :incoming` | Duplicate and out-of-order events |
 | Fan-out | `state_seq = :seen AND graph_epoch <= :epoch` | Overwriting a user decision made mid-flight, or a newer graph epoch |
-| Backfill and reconciliation | Hook rule, using the `state_seq` returned by the load | A slow load overwriting a newer hook |
+| Backfill and reconciliation | Hook rule, using the `state_seq` returned by the load, `AND (attribute_not_exists(graph_epoch) OR graph_epoch <= :epoch)` | A slow load overwriting a newer hook, or re-offering a version withdrawn during the load |
 
 **Races.**
 
 - *User decides mid-fan-out:* the fan-out write fails on `state_seq`, and the worker re-reads and recomputes.
 - *Publish racing a withdrawal:* neither changes `state_seq`, so without the epoch condition an older fan-out could finish last and re-offer a withdrawn version. `graph_epoch <= :epoch` rejects it.
+- *Withdrawal during a backfill load:* the 1-minute load can straddle a graph change. The epoch condition fails, and the worker re-derives against the fresh graph without reloading. The epoch written is always that of the graph the target was derived from.
 - *Engagement created during a fan-out:* every hook write recomputes `pending_target` against the current graph. A row written just before the graph update, or missed by the eventually consistent GSI-2, is caught by a periodic sweep that re-evaluates any row whose `graph_epoch` lags the current one.
 
 **Drift statistics.** With zero drift observed in *n* samples, the 95% upper bound is about 3/*n* (rule of three). One week (4,000 samples) only bounds drift below 0.075%, so the 0.01% SLO is evaluated over a rolling 8 weeks (32,000 samples, bound about 0.009%). Every `loaded` event is also compared with its row before it is applied: a continuous, free signal, biased toward active files.
