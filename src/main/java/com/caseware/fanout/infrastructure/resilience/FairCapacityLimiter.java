@@ -36,7 +36,7 @@ public final class FairCapacityLimiter implements CapacityLimiter {
     private final ConcurrentHashMap<FirmId, AtomicInteger> firmInFlight = new ConcurrentHashMap<>();
 
     public FairCapacityLimiter(int maxGlobal, int maxPerFirm, FanoutMetrics metrics) {
-        if (maxGlobal < 1 || maxPerFirm < 1) {
+        if (maxPerFirm < 1) { // and maxGlobal >= maxPerFirm >= 1 follows from the next check
             throw new IllegalArgumentException("caps must be >= 1");
         }
         if (maxPerFirm > maxGlobal) {

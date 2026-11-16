@@ -14,11 +14,10 @@ final class Ids {
 
     private Ids() {}
 
-    static String requireNonBlank(String value, String name) {
+    static void requireNonBlank(String value, String name) {
         Objects.requireNonNull(value, name);
         if (value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
         }
-        return value;
     }
 }

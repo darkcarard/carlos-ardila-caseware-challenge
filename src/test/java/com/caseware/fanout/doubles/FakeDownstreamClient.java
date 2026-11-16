@@ -152,9 +152,13 @@ public final class FakeDownstreamClient implements DownstreamEngagementClient {
         return List.copyOf(completionOrder);
     }
 
+    /**
+     * Per-firm first, then global (and the reverse on exit), so that once a waiter sees the global
+     * count reach N, every per-firm count behind those N loads is already visible.
+     */
     private void enter(FirmId firmId) {
-        peakGlobal.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
         peakPerFirm.accumulateAndGet(perFirm.computeIfAbsent(firmId, k -> new AtomicInteger()).incrementAndGet(), Math::max);
+        peakGlobal.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
         signal();
     }
 

@@ -10,17 +10,21 @@ import static com.caseware.fanout.doubles.TestData.PRODUCT;
 import static com.caseware.fanout.doubles.TestData.v;
 import static com.caseware.fanout.doubles.TestData.versions;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import com.caseware.fanout.domain.model.EngagementId;
 import com.caseware.fanout.domain.model.EngagementRecord;
+import com.caseware.fanout.domain.model.FanoutChunk;
 import com.caseware.fanout.domain.model.LocaleCode;
 import com.caseware.fanout.domain.model.SummaryPair;
 import com.caseware.fanout.domain.port.CircuitBreaker;
 import com.caseware.fanout.domain.port.DownstreamEngagementClient;
+import com.caseware.fanout.domain.port.TelemetryContext;
 import java.lang.reflect.Constructor;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -152,6 +156,87 @@ class FanoutChunkProcessorTest {
         assertThat(duplicate).isEqualTo(new FanoutResult.Completed(f.single("pub-1", 2, ids).key(), ChunkStats.ZERO));
         assertThat(f.registry.reads()).isEqualTo(reads);
         assertThat(f.metrics.count("fanout.chunk.duplicate")).isEqualTo(1);
+    }
+
+    @Test
+    void rowAlreadyAtTheCurrentEpochButWithADriftedTargetIsRepaired() {
+        EngagementId id = f.seedRows(1, "v4").getFirst();
+        f.registry.seed(f.row(id).withDerivedPending(Optional.of(v("v5")), 2, T0)); // v7 is the right answer
+
+        FanoutResult result = f.processor().process(f.single("pub-1", 2, List.of(id)));
+
+        assertThat(result).isInstanceOfSatisfying(FanoutResult.Completed.class,
+                c -> assertThat(c.stats().written()).isEqualTo(1));
+        assertThat(f.row(id).pendingTarget()).contains(v("v7"));
+    }
+
+    @Test
+    void checkpointsEveryNRowsAndOnCompletionButNotTwiceAtTheEnd() {
+        List<EngagementId> ids = f.seedRows(100, "v4"); // exactly 2 x CHECKPOINT_EVERY
+
+        f.processor().process(f.single("pub-1", 2, ids));
+
+        assertThat(f.checkpoints.advances()).isEqualTo(2); // offset 50, then complete(100)
+    }
+
+    @Test
+    void eachFlushPublishesOnlyThePairsFoundSinceThePreviousOne() {
+        List<EngagementId> ids = FanoutFixture.ids(100);
+        for (int i = 0; i < ids.size(); i++) {
+            f.registry.seed(row(FIRM, ids.get(i), i < 50 ? "v4" : "v5", Set.of(), 1, false));
+        }
+
+        f.processor().process(f.single("pub-1", 2, ids));
+
+        assertThat(f.summaries.batches()).hasSize(2);
+        assertThat(f.summaries.batches().get(1)).containsExactlyInAnyOrder(
+                pair("v5", "v7", "en-CA"), pair("v5", "v7", "fr-CA"));
+    }
+
+    @Test
+    void chunkWithNothingPendingPublishesNoEmptyBatch() {
+        List<EngagementId> ids = f.seedRows(3, "v7"); // already on the latest version
+
+        f.processor().process(f.single("pub-1", 2, ids));
+
+        assertThat(f.summaries.batches()).isEmpty();
+    }
+
+    @Test
+    void completedChunkReportsRowCountersWithChunkCorrelation() {
+        List<EngagementId> ids = f.seedRows(3, "v4");
+        f.registry.seed(f.row(ids.get(1)).withDerivedPending(Optional.of(v("v5")), 9, T0)); // a newer epoch won
+        java.util.concurrent.atomic.AtomicBoolean raced = new java.util.concurrent.atomic.AtomicBoolean();
+        f.registry.beforeFanoutWrite(w -> {
+            if (w.engagementId().equals(ids.get(2)) && raced.compareAndSet(false, true)) {
+                f.registry.applyHook(FIRM, ids.get(2), r -> FanoutFixture.declined(r, "v6"));
+            }
+        });
+
+        FanoutChunk chunk = f.single("pub-1", 2, ids);
+        f.processor().process(chunk);
+
+        assertThat(f.metrics.count("fanout.chunk.completed")).isEqualTo(1);
+        assertThat(f.metrics.count("fanout.rows.evaluated")).isEqualTo(3);
+        assertThat(f.metrics.count("fanout.rows.written")).isEqualTo(2);
+        assertThat(f.metrics.count("fanout.rows.superseded")).isEqualTo(1);
+        assertThat(f.metrics.count("fanout.rows.conflict_retries")).isEqualTo(1);
+        TelemetryContext ctx = f.metrics.lastContext("fanout.rows.written");
+        assertThat(ctx.chunkId()).contains(chunk.key().chunkId());
+        assertThat(ctx.firmId()).contains(FIRM);
+        assertThat(ctx.publishId()).contains(chunk.publishId());
+    }
+
+    @Test
+    void rejectsInvalidConfiguration() {
+        assertThatIllegalArgumentException().isThrownBy(() -> new FanoutChunkProcessor(f.registry, f.graphs,
+                f.checkpoints, f.summaries, f.breaker, f.metrics, f.clock, Set.of(), 50));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FanoutChunkProcessor(f.registry, f.graphs,
+                f.checkpoints, f.summaries, f.breaker, f.metrics, f.clock, FanoutFixture.LOCALES, 0));
+        FanoutChunkProcessor everyRow = new FanoutChunkProcessor(f.registry, f.graphs, f.checkpoints, f.summaries,
+                f.breaker, f.metrics, f.clock, FanoutFixture.LOCALES, 1);
+        everyRow.process(f.single("pub-1", 2, f.seedRows(3, "v4")));
+        assertThat(f.checkpoints.advances()).isEqualTo(3); // offsets 1 and 2, then complete(3)
     }
 
     @Test

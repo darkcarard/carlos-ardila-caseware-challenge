@@ -11,6 +11,7 @@ import static com.caseware.fanout.doubles.TestData.PRODUCT;
 import static com.caseware.fanout.doubles.TestData.v;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import com.caseware.fanout.doubles.FakeDownstreamClient;
@@ -18,6 +19,7 @@ import com.caseware.fanout.domain.error.DownstreamRateLimitException;
 import com.caseware.fanout.domain.error.NonRetryableDataException;
 import com.caseware.fanout.domain.model.EngagementId;
 import com.caseware.fanout.domain.model.EngagementRecord;
+import com.caseware.fanout.domain.model.FirmId;
 import com.caseware.fanout.domain.model.LoadedEngagement;
 import com.caseware.fanout.domain.model.Source;
 import com.caseware.fanout.domain.port.CircuitBreaker;
@@ -51,6 +53,7 @@ class BackfillWorkerServiceTest {
                 assertThat(row.pendingTarget()).contains(v("v7"));
                 assertThat(row.pendingSince()).contains(T0);
             });
+            assertThat(f.metrics.count("backfill.load.completed")).isEqualTo(3);
         }
 
         @Test
@@ -122,6 +125,20 @@ class BackfillWorkerServiceTest {
             BackfillReport report = f.service(alwaysBehind).run(List.of(item));
 
             assertThat(report.outcomes()).singleElement().isInstanceOf(LoadOutcome.Deferred.class);
+            assertThat(f.registry.writeAttempts()).isEqualTo(3); // bounded re-derivation, then give up
+            assertThat(f.client.calls()).isEqualTo(1);
+        }
+
+        @Test
+        void registryThrottlingAfterASuccessfulLoadDefersTheItem() throws InterruptedException {
+            f.registry.throttleAllWrites(true);
+            BackfillItem item = items(FIRM, 1).getFirst();
+
+            BackfillReport report = f.service().run(List.of(item));
+
+            assertThat(report.outcomes()).singleElement().isInstanceOfSatisfying(LoadOutcome.Deferred.class,
+                    d -> assertThat(d.next().attemptsMade()).isEqualTo(1)); // the lost load counts as an attempt
+            assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED); // the downstream was healthy
         }
 
         @Test
@@ -158,6 +175,7 @@ class BackfillWorkerServiceTest {
 
             assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.OPEN);
             assertThat(f.client.calls()).isEqualTo(3); // threshold, then nothing more reaches the owner team
+            assertThat(f.metrics.count("backfill.load.transient_failure")).isEqualTo(3);
             List<LoadOutcome.Deferred> deferred = report.of(LoadOutcome.Deferred.class);
             assertThat(deferred).hasSize(10);
             assertThat(deferred.stream().filter(d -> d.reason().contains("429")))
@@ -165,7 +183,9 @@ class BackfillWorkerServiceTest {
                     .allSatisfy(d -> {
                         assertThat(d.next().attemptsMade()).isEqualTo(1);
                         assertThat(d.retryAt()).isBetween(T0.plusSeconds(5), T0.plusSeconds(10));
-                    });
+                    })
+                    .extracting(LoadOutcome.Deferred::retryAt)
+                    .doesNotHaveDuplicates(); // per-item jitter: retries do not come back as a herd
             assertThat(deferred.stream().filter(d -> d.reason().contains("circuit open")))
                     .hasSize(7)
                     .allSatisfy(d -> {
@@ -188,6 +208,31 @@ class BackfillWorkerServiceTest {
 
             assertThat(second.count(LoadOutcome.Seeded.class)).isEqualTo(10);
             assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+        }
+
+        @Test
+        void aLoneItemMetByAnOpenBreakerIsDeferredWithoutConsumingAnAttempt() throws InterruptedException {
+            trip(f.breaker);
+            BackfillItem item = items(FIRM, 1).getFirst();
+
+            BackfillReport report = f.service().run(List.of(item));
+
+            assertThat(f.client.calls()).isZero();
+            assertThat(report.outcomes()).singleElement()
+                    .isEqualTo(new LoadOutcome.Deferred(item, item, T0.plusSeconds(30), "downstream circuit open"));
+        }
+
+        @Test
+        void aBugInTheClientFailsTheItemWithoutKillingTheRun() throws InterruptedException {
+            f.client.respondWith((firm, e) -> {
+                throw new IllegalStateException("client bug");
+            });
+
+            BackfillReport report = f.service().run(items(FIRM, 2));
+
+            assertThat(report.of(LoadOutcome.Failed.class)).hasSize(2)
+                    .allSatisfy(failed -> assertThat(failed.reason()).contains("unexpected", "client bug"));
+            assertThat(f.limiter.globalInFlight()).isZero();
         }
 
         @Test
@@ -236,9 +281,14 @@ class BackfillWorkerServiceTest {
             assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
                 BackfillFixture f = new BackfillFixture(FakeDownstreamClient.gated(), 3, 3);
                 FutureTask<BackfillReport> run = new FutureTask<>(() -> f.service().run(items(FIRM, 20)));
-                Thread.ofVirtual().start(run);
+                Thread dispatcher = Thread.ofVirtual().start(run);
 
                 f.client.awaitInFlight(3, Duration.ofSeconds(5));
+                // Its only blocking point is the wait for a completion, so WAITING means the dispatcher has
+                // already passed its kill-switch check for this round and is parked.
+                while (dispatcher.getState() != Thread.State.WAITING) {
+                    Thread.onSpinWait();
+                }
                 f.killSwitch.set(true);
                 f.client.releaseNext(Duration.ofSeconds(5)); // the dispatcher notices the switch on this completion
 
@@ -249,7 +299,118 @@ class BackfillWorkerServiceTest {
                 assertThat(report.count(LoadOutcome.Aborted.class)).isEqualTo(19);
                 assertThat(report.outcomes()).hasSize(20);
                 assertThat(f.limiter.globalInFlight()).isZero(); // no slot leaked by the interrupted loads
+                assertThat(f.metrics.count("backfill.kill_switch.tripped")).isEqualTo(1);
             });
+        }
+
+        @Test
+        void interruptingTheDispatcherCancelsLoadsAndGivesBackSlotsAndTheProbe() {
+            assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
+                BackfillFixture f = new BackfillFixture(FakeDownstreamClient.gated());
+                trip(f.breaker);
+                f.clock.advance(Duration.ofSeconds(30)); // the next load is the HALF_OPEN probe
+                FutureTask<BackfillReport> run = new FutureTask<>(() -> f.service().run(items(FIRM, 3)));
+                Thread dispatcher = Thread.ofVirtual().start(run);
+                f.client.awaitInFlight(1, Duration.ofSeconds(5));
+
+                dispatcher.interrupt();
+
+                assertThatThrownBy(run::get).hasCauseInstanceOf(InterruptedException.class);
+                assertThat(f.client.inFlight()).isZero();
+                assertThat(f.limiter.globalInFlight()).isZero();
+                assertThat(f.breaker.tryAcquirePermission()).as("a new probe may start").isTrue();
+            });
+        }
+    }
+
+    @Test
+    void whileTheProbeIsInFlightTheDispatcherWaitsForItInsteadOfDeferringOrSpinning() {
+        assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
+            BackfillFixture f = new BackfillFixture(FakeDownstreamClient.gated());
+            trip(f.breaker);
+            f.clock.advance(Duration.ofSeconds(30));
+            WaitCheckingBreaker breaker = new WaitCheckingBreaker(f.breaker);
+            BackfillWorkerService service = new BackfillWorkerService(f.client, f.registry, f.graphs, f.limiter,
+                    breaker, () -> false, BackfillFixture.RETRY, f.metrics, f.clock, Source.BACKFILL);
+            // Two firms with one item each: the denied item is its firm's last, so pushing it back must
+            // re-register the firm in the round-robin ring or it would be silently dropped.
+            List<BackfillItem> work = BackfillFixture.concat(List.of(items(FIRM, 1), items(FirmId.of("firm-other"), 1)));
+            FutureTask<BackfillReport> run = new FutureTask<>(() -> service.run(work));
+            Thread.ofVirtual().start(run);
+
+            f.client.awaitInFlight(1, Duration.ofSeconds(5));
+            assertThat(f.client.calls()).isEqualTo(1); // only the probe; the other item waits for its verdict
+            while (!run.isDone()) {
+                f.client.releaseNext(Duration.ofMillis(50));
+            }
+
+            assertThat(run.get().count(LoadOutcome.Seeded.class)).isEqualTo(2);
+            assertThat(breaker.askedAgainWithoutAVerdict()).isFalse();
+        });
+    }
+
+    private static void trip(CircuitBreaker breaker) {
+        for (int i = 0; i < 3; i++) {
+            breaker.recordFailure();
+        }
+    }
+
+    /**
+     * Flags a dispatcher that asks the breaker again after a denial before any verdict (success,
+     * failure or released permission) reached it: the answer cannot have changed, so asking again
+     * means busy-spinning. Every load records its verdict before its future completes, so a
+     * dispatcher that waits for a completion always sees a new verdict first.
+     */
+    private static final class WaitCheckingBreaker implements CircuitBreaker {
+        private final CircuitBreaker delegate;
+        private int verdicts;
+        private int verdictsAtDenial = -1;
+        private boolean askedAgainWithoutAVerdict;
+
+        WaitCheckingBreaker(CircuitBreaker delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public synchronized boolean tryAcquirePermission() {
+            if (verdictsAtDenial == verdicts) {
+                askedAgainWithoutAVerdict = true;
+            }
+            boolean granted = delegate.tryAcquirePermission();
+            verdictsAtDenial = granted ? -1 : verdicts;
+            return granted;
+        }
+
+        @Override
+        public synchronized void recordSuccess() {
+            verdicts++;
+            delegate.recordSuccess();
+        }
+
+        @Override
+        public synchronized void recordFailure() {
+            verdicts++;
+            delegate.recordFailure();
+        }
+
+        @Override
+        public synchronized void releasePermission() {
+            verdicts++;
+            delegate.releasePermission();
+        }
+
+        synchronized boolean askedAgainWithoutAVerdict() {
+            return askedAgainWithoutAVerdict;
+        }
+
+        @Override
+        public State state() {
+            return delegate.state();
+        }
+
+        @Override
+        public Duration retryAfter() {
+            return delegate.retryAfter();
         }
     }
 

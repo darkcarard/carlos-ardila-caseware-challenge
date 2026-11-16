@@ -168,6 +168,77 @@ class FanoutResilienceTest {
         }
     }
 
+    /**
+     * A HALF_OPEN probe must end in a verdict whatever the chunk's outcome. Only a transient failure
+     * re-opens the breaker; any other outcome proves the registry answered, so it closes. Otherwise the
+     * single probe permission would be held forever and every later chunk would be Throttled.
+     */
+    @Nested
+    class ProbeVerdicts {
+
+        private final List<EngagementId> ids = f.seedRows(3, "v4");
+
+        private void armProbe() {
+            for (int i = 0; i < 3; i++) {
+                f.breaker.recordFailure();
+            }
+            f.clock.advance(Duration.ofSeconds(30));
+        }
+
+        @Test
+        void poisonChunkClosesTheBreaker() {
+            FanoutChunk poison = new FanoutChunk(f.single("pub", 2, ids).publishId(), FIRM,
+                    com.caseware.fanout.doubles.TestData.PRODUCT, Market.of("XX"), 2, 0, 1, ids);
+            armProbe();
+
+            assertThat(f.processor().process(poison)).isInstanceOf(FanoutResult.PoisonMessage.class);
+            assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+            assertThat(f.metrics.count("fanout.chunk.poison")).isEqualTo(1);
+        }
+
+        @Test
+        void duplicateOfACompletedChunkClosesTheBreaker() {
+            FanoutChunk chunk = f.single("pub", 2, ids);
+            f.processor().process(chunk);
+            armProbe();
+
+            assertThat(f.processor().process(chunk)).isInstanceOf(FanoutResult.Completed.class);
+            assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+        }
+
+        @Test
+        void laggingGraphProjectionClosesTheBreaker() {
+            armProbe();
+
+            assertThat(f.processor().process(f.single("pub", 3, ids))).isInstanceOf(FanoutResult.PartialRetry.class);
+            assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+            assertThat(f.metrics.count("fanout.chunk.graph_lagging")).isEqualTo(1);
+        }
+
+        @Test
+        void conflictYieldClosesTheBreaker() {
+            f.registry.beforeFanoutWrite(w -> f.registry.applyHook(FIRM, w.engagementId(),
+                    r -> FanoutFixture.declined(r, "v6"))); // a user who never stops clicking
+            armProbe();
+
+            assertThat(f.processor().process(f.single("pub", 2, ids))).isInstanceOf(FanoutResult.PartialRetry.class);
+            assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+            assertThat(f.metrics.count("fanout.chunk.conflict_yield")).isEqualTo(1);
+        }
+
+        @Test
+        void transientFailureReopensItAndIsCounted() {
+            f.registry.throttleAllWrites(true);
+            armProbe();
+
+            assertThat(f.processor().process(f.single("pub", 2, ids))).isInstanceOf(FanoutResult.PartialRetry.class);
+            assertThat(f.breaker.state()).isEqualTo(CircuitBreaker.State.OPEN);
+            assertThat(f.metrics.count("fanout.chunk.transient_failure")).isEqualTo(1);
+            assertThat(f.processor().process(f.single("pub", 2, ids))).isInstanceOf(FanoutResult.Throttled.class);
+            assertThat(f.metrics.count("fanout.chunk.throttled")).isEqualTo(1);
+        }
+    }
+
     @Nested
     class PoisonVersusTransient {
 

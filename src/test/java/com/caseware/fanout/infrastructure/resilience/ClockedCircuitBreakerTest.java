@@ -98,9 +98,27 @@ class ClockedCircuitBreakerTest {
     }
 
     @Test
+    void retryAfterCountsDownAndNeverGoesNegative() {
+        fail(3);
+        clock.advance(Duration.ofSeconds(20));
+        assertThat(breaker.retryAfter()).isEqualTo(Duration.ofSeconds(10));
+        clock.advance(Duration.ofSeconds(25)); // cool-down over, but nobody has asked for the probe yet
+        assertThat(breaker.state()).isEqualTo(State.OPEN);
+        assertThat(breaker.retryAfter()).isEqualTo(Duration.ZERO);
+    }
+
+    @Test
+    void thresholdOfOneOpensOnTheFirstFailure() {
+        ClockedCircuitBreaker hair = new ClockedCircuitBreaker(clock, 1, Duration.ofSeconds(1));
+        hair.recordFailure();
+        assertThat(hair.state()).isEqualTo(State.OPEN);
+    }
+
+    @Test
     void rejectsInvalidConfiguration() {
         assertThatIllegalArgumentException().isThrownBy(() -> new ClockedCircuitBreaker(clock, 0, Duration.ofSeconds(1)));
         assertThatIllegalArgumentException().isThrownBy(() -> new ClockedCircuitBreaker(clock, 1, Duration.ZERO));
+        assertThatIllegalArgumentException().isThrownBy(() -> new ClockedCircuitBreaker(clock, 1, Duration.ofSeconds(-1)));
     }
 
     private void fail(int times) {

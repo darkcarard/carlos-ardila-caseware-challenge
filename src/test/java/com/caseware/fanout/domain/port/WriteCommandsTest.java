@@ -37,6 +37,19 @@ class WriteCommandsTest {
     }
 
     @Test
+    void fanoutWriteRejectsInconsistentPendingFieldsAndNegativeGuards() {
+        EngagementRecord seen = row("v4", 7);
+        assertThatIllegalArgumentException().isThrownBy(() -> new FanoutWrite(seen.firmId(), seen.engagementId(),
+                7, 3, Optional.of(v("v5")), Optional.empty()));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FanoutWrite(seen.firmId(), seen.engagementId(),
+                7, 3, Optional.empty(), Optional.of(T0)));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FanoutWrite(seen.firmId(), seen.engagementId(),
+                -1, 3, Optional.empty(), Optional.empty()));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FanoutWrite(seen.firmId(), seen.engagementId(),
+                7, -1, Optional.empty(), Optional.empty()));
+    }
+
+    @Test
     void backfillWriteRejectsHookProvenance() {
         assertThatIllegalArgumentException().isThrownBy(() -> new BackfillWrite(row("v4", 1)));
     }

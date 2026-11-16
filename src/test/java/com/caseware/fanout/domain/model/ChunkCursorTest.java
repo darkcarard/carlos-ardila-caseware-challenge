@@ -25,6 +25,13 @@ class ChunkCursorTest {
     }
 
     @Test
+    void advancingToTheSameOffsetIsAnIdempotentNoOp() {
+        ChunkCursor at250 = ChunkCursor.start(KEY).advanceTo(250);
+        assertThat(at250.advanceTo(250)).isEqualTo(at250);
+        assertThat(at250.complete(250).isAheadOf(at250)).isTrue(); // completion alone is progress
+    }
+
+    @Test
     void completedCursorIsTerminal() {
         ChunkCursor done = ChunkCursor.start(KEY).complete(500);
         assertThatIllegalStateException().isThrownBy(() -> done.advanceTo(500));

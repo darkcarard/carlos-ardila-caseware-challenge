@@ -41,6 +41,32 @@ class VersionGraphTest {
     }
 
     @Test
+    void cycleErrorNamesOnlyTheVersionsOnTheCycle() {
+        assertThatThrownBy(() -> VersionGraph.of(PRODUCT, EU, 1, List.of(
+                        published("v1", 1),
+                        published("v2", 2, "v1", "v3"),
+                        published("v3", 3, "v2"))))
+                .hasMessageEndingWith("cycle through [v2, v3]"); // v1 is a healthy root, so it is not blamed
+    }
+
+    @Test
+    void rejectsANodeFromAnotherProductInTheSameMarket() {
+        VersionNode foreign = new VersionNode(v("v2"), ProductId.of("other-product"), EU, versions("v1"),
+                VersionStatus.PUBLISHED, 2);
+        assertThatThrownBy(() -> VersionGraph.of(PRODUCT, EU, 1, List.of(published("v1", 1), foreign)))
+                .isInstanceOf(NonRetryableDataException.class)
+                .hasMessageContaining("belongs to");
+    }
+
+    @Test
+    void publishingAnExistingVersionAgainIsNonRetryable() {
+        VersionGraph graph = VersionGraph.of(PRODUCT, EU, 1, List.of(published("v1", 1)));
+        assertThatThrownBy(() -> graph.withPublished(published("v1", 2)))
+                .isInstanceOf(NonRetryableDataException.class)
+                .hasMessageContaining("already exists");
+    }
+
+    @Test
     void rejectsADanglingParent() {
         assertThatThrownBy(() -> VersionGraph.of(PRODUCT, EU, 1, List.of(published("v5", 5, "v4"))))
                 .isInstanceOf(NonRetryableDataException.class)

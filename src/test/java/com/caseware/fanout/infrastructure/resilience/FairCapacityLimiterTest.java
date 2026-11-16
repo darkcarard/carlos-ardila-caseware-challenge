@@ -135,9 +135,39 @@ class FairCapacityLimiterTest {
     }
 
     @Test
+    void blockingAcquireWaitsForAPerFirmSlotEvenWithGlobalSlotsIdle() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            FairCapacityLimiter limiter = new FairCapacityLimiter(10, 1, metrics);
+            Permit first = limiter.acquire(A);
+            FutureTask<Permit> second = new FutureTask<>(() -> limiter.acquire(A));
+            Thread thread = Thread.ofVirtual().start(second);
+            while (thread.getState() != Thread.State.WAITING) {
+                Thread.onSpinWait();
+            }
+
+            assertThat(second.isDone()).isFalse();
+            assertThat(limiter.inFlight(A)).isEqualTo(1);
+            first.close();
+            assertThat(second.get().firmId()).isEqualTo(A);
+            assertThat(metrics.violations()).isEmpty();
+        });
+    }
+
+    @Test
+    void inFlightIsTrackedPerFirm() {
+        FairCapacityLimiter limiter = new FairCapacityLimiter(10, 5, metrics);
+        assertThat(limiter.inFlight(A)).isZero(); // never seen
+        take(limiter, A, 2);
+        assertThat(limiter.inFlight(A)).isEqualTo(2);
+        assertThat(limiter.inFlight(B)).isZero();
+    }
+
+    @Test
     void rejectsInvalidCaps() {
         assertThatIllegalArgumentException().isThrownBy(() -> new FairCapacityLimiter(0, 1, metrics));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FairCapacityLimiter(1, 0, metrics));
         assertThatIllegalArgumentException().isThrownBy(() -> new FairCapacityLimiter(5, 10, metrics));
+        assertThat(new FairCapacityLimiter(1, 1, metrics).tryAcquire(A)).isPresent(); // smallest valid caps
     }
 
     private static List<Permit> take(FairCapacityLimiter limiter, FirmId firm, int n) {

@@ -124,7 +124,7 @@ public final class BackfillWorkerService {
                         queue.drain().forEach(item -> outcomes.add(new LoadOutcome.Aborted(item)));
                     }
 
-                    if (!aborted && tryDispatch(queue, completions, inFlight, outcomes)) {
+                    if (tryDispatch(queue, completions, inFlight, outcomes)) { // a drained queue dispatches nothing
                         continue;
                     }
                     if (inFlight.isEmpty()) {
@@ -182,7 +182,7 @@ public final class BackfillWorkerService {
     }
 
     /** Runs on a virtual thread while holding {@code permit} (per-firm and global slots) and one breaker permission. */
-    private LoadOutcome load(BackfillItem item, CapacityLimiter.Permit permit) {
+    private LoadOutcome load(BackfillItem item, CapacityLimiter.Permit permit) throws InterruptedException {
         TelemetryContext ctx = TelemetryContext.forFirm(item.firmId());
         try (permit) {
             LoadedEngagement loaded;
@@ -202,9 +202,10 @@ public final class BackfillWorkerService {
             permit.close();
             return seed(item, loaded);
         } catch (InterruptedException e) {
+            // Cancelled (kill switch or dispatcher interrupt). Give back a HALF_OPEN probe permission here:
+            // when the dispatcher itself is interrupted, settle() never runs for this future.
             breaker.releasePermission();
-            Thread.currentThread().interrupt();
-            return new LoadOutcome.Aborted(item);
+            throw e;
         }
     }
 

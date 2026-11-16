@@ -29,6 +29,12 @@ class EngagementRecordTest {
     }
 
     @Test
+    void isPendingExactlyWhenATargetIsSet() {
+        assertThat(record(false, Optional.of(v("v5")), Optional.of(T0)).isPending()).isTrue();
+        assertThat(record(false, Optional.empty(), Optional.empty()).isPending()).isFalse();
+    }
+
+    @Test
     void pendingTargetAndPendingSinceTravelTogether() {
         assertThatIllegalArgumentException().isThrownBy(() -> record(false, Optional.of(v("v5")), Optional.empty()));
         assertThatIllegalArgumentException().isThrownBy(() -> record(false, Optional.empty(), Optional.of(T0)));

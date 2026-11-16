@@ -82,25 +82,24 @@ public final class ClockedCircuitBreaker implements CircuitBreaker {
 
     @Override
     public synchronized void recordFailure() {
-        if (state == State.OPEN) {
-            return; // late failure; already open, do not extend the window
-        }
-        probeInFlight = false;
-        if (state == State.HALF_OPEN) {
-            open();
-            return;
-        }
-        consecutiveFailures++;
-        if (state == State.CLOSED && consecutiveFailures >= failureThreshold) {
-            open();
+        switch (state) {
+            case OPEN -> { } // late failure from a call admitted before opening: do not extend the window
+            case HALF_OPEN -> {
+                probeInFlight = false;
+                open();
+            }
+            case CLOSED -> {
+                if (++consecutiveFailures >= failureThreshold) {
+                    open();
+                }
+            }
+            default -> throw new IllegalStateException("unknown state " + state);
         }
     }
 
     @Override
     public synchronized void releasePermission() {
-        if (state == State.HALF_OPEN) {
-            probeInFlight = false;
-        }
+        probeInFlight = false; // only read in HALF_OPEN, so clearing it in other states is harmless
     }
 
     @Override

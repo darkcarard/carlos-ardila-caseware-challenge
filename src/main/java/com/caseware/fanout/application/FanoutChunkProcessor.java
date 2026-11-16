@@ -122,7 +122,8 @@ public final class FanoutChunkProcessor {
             for (int i = start; i < chunk.size(); i++) {
                 evaluateRow(chunk, chunk.engagementIds().get(i), graph, tally, pendingPairs, ctx);
                 int done = i + 1;
-                if (done < chunk.size() && (done - start) % checkpointEvery == 0) {
+                // Row-aligned checkpoints (50, 100, ...); the last row is covered by complete() below.
+                if (done < chunk.size() && done % checkpointEvery == 0) {
                     flush(pendingPairs);
                     cursor = checkpoints.advance(cursor.advanceTo(done));
                 }
