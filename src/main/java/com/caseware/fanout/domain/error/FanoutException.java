@@ -1,5 +1,7 @@
 package com.caseware.fanout.domain.error;
 
+import java.io.Serial;
+
 /**
  * Closed failure taxonomy for the fan-out and backfill paths.
  *
@@ -14,6 +16,9 @@ package com.caseware.fanout.domain.error;
  */
 public abstract sealed class FanoutException extends RuntimeException
         permits TransientInfrastructureException, OptimisticLockConflictException, NonRetryableDataException {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     protected FanoutException(String message) {
         super(message);
