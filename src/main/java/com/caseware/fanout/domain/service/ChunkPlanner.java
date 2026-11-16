@@ -6,6 +6,7 @@ import com.caseware.fanout.domain.model.FirmId;
 import com.caseware.fanout.domain.model.Market;
 import com.caseware.fanout.domain.model.ProductId;
 import com.caseware.fanout.domain.model.PublishId;
+import com.caseware.fanout.domain.model.TemplateVersion;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -27,12 +28,15 @@ public final class ChunkPlanner {
     private ChunkPlanner() {}
 
     public static List<FanoutChunk> plan(PublishId publishId, FirmId firmId, ProductId productId, Market market,
-                                         long graphEpoch, Collection<EngagementId> engagementIds) {
-        return plan(publishId, firmId, productId, market, graphEpoch, engagementIds, FanoutChunk.MAX_ENGAGEMENTS);
+                                         TemplateVersion templateVersion, long graphEpoch,
+                                         Collection<EngagementId> engagementIds) {
+        return plan(publishId, firmId, productId, market, templateVersion, graphEpoch, engagementIds,
+                FanoutChunk.MAX_ENGAGEMENTS);
     }
 
     static List<FanoutChunk> plan(PublishId publishId, FirmId firmId, ProductId productId, Market market,
-                                  long graphEpoch, Collection<EngagementId> engagementIds, int chunkSize) {
+                                  TemplateVersion templateVersion, long graphEpoch,
+                                  Collection<EngagementId> engagementIds, int chunkSize) {
         Objects.requireNonNull(engagementIds, "engagementIds");
         if (chunkSize < 1 || chunkSize > FanoutChunk.MAX_ENGAGEMENTS) {
             throw new IllegalArgumentException("chunkSize must be in [1, " + FanoutChunk.MAX_ENGAGEMENTS + "]: " + chunkSize);
@@ -46,7 +50,8 @@ public final class ChunkPlanner {
         for (int index = 0; index < total; index++) {
             int from = index * chunkSize;
             int to = Math.min(from + chunkSize, ids.size());
-            chunks.add(new FanoutChunk(publishId, firmId, productId, market, graphEpoch, index, total, ids.subList(from, to)));
+            chunks.add(new FanoutChunk(publishId, firmId, productId, market, templateVersion, graphEpoch, index, total,
+                    ids.subList(from, to)));
         }
         return List.copyOf(chunks);
     }

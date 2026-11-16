@@ -225,6 +225,7 @@ class FanoutChunkProcessorTest {
         assertThat(ctx.chunkId()).contains(chunk.key().chunkId());
         assertThat(ctx.firmId()).contains(FIRM);
         assertThat(ctx.publishId()).contains(chunk.publishId());
+        assertThat(ctx.templateVersion()).contains(v("v7"));
     }
 
     @Test

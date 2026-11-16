@@ -33,7 +33,7 @@ public record TelemetryContext(
 
     public static TelemetryContext forChunk(FanoutChunk chunk) {
         return new TelemetryContext(Optional.of(chunk.publishId()), Optional.of(chunk.productId()),
-                Optional.empty(), Optional.of(chunk.firmId()), Optional.of(chunk.key().chunkId()));
+                Optional.of(chunk.templateVersion()), Optional.of(chunk.firmId()), Optional.of(chunk.key().chunkId()));
     }
 
     public static TelemetryContext forFirm(FirmId firmId) {

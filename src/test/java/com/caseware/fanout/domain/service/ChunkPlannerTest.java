@@ -9,6 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import com.caseware.fanout.domain.model.EngagementId;
 import com.caseware.fanout.domain.model.FanoutChunk;
 import com.caseware.fanout.domain.model.PublishId;
+import com.caseware.fanout.domain.model.TemplateVersion;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 class ChunkPlannerTest {
 
     private static final PublishId PUBLISH = PublishId.of("pub-1");
+    private static final TemplateVersion VERSION = TemplateVersion.of("v7");
 
     @Test
     void largestFirmOf40000EngagementsBecomes80FullChunks() {
@@ -69,15 +71,15 @@ class ChunkPlannerTest {
     @Test
     void rejectsChunkSizeAboveTheSqsLimit() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, 1, ids(10), 501));
+                .isThrownBy(() -> ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, VERSION, 1, ids(10), 501));
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, 1, ids(10), 0));
+                .isThrownBy(() -> ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, VERSION, 1, ids(10), 0));
     }
 
     @Property(tries = 200)
     void chunksPartitionTheInputExactly(@ForAll @IntRange(min = 0, max = 3_000) int count,
                                         @ForAll @IntRange(min = 1, max = 500) int chunkSize) {
-        List<FanoutChunk> chunks = ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, 1, ids(count), chunkSize);
+        List<FanoutChunk> chunks = ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, VERSION, 1, ids(count), chunkSize);
 
         List<EngagementId> flattened = chunks.stream().flatMap(c -> c.engagementIds().stream()).toList();
         assertThat(flattened).hasSize(count);
@@ -91,7 +93,7 @@ class ChunkPlannerTest {
     }
 
     private static List<FanoutChunk> plan(List<EngagementId> ids) {
-        return ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, 1, ids);
+        return ChunkPlanner.plan(PUBLISH, FIRM, PRODUCT, EU, VERSION, 1, ids);
     }
 
     private static List<EngagementId> ids(int n) {

@@ -76,7 +76,7 @@ final class FanoutFixture {
     }
 
     List<FanoutChunk> plan(String publishId, long epoch, List<EngagementId> ids) {
-        return ChunkPlanner.plan(PublishId.of(publishId), FIRM, PRODUCT, EU, epoch, ids);
+        return ChunkPlanner.plan(PublishId.of(publishId), FIRM, PRODUCT, EU, v("v7"), epoch, ids); // every fixture publishes or withdraws v7
     }
 
     FanoutChunk single(String publishId, long epoch, List<EngagementId> ids) {

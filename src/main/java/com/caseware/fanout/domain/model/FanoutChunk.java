@@ -9,6 +9,11 @@ import java.util.Objects;
  * re-evaluated against the {@code (productId, market)} graph at {@code graphEpoch} or later.
  * REGIONAL ONLY.
  *
+ * <p>{@code templateVersion} is the version whose publish or withdrawal triggered this fan-out. It
+ * is <strong>correlation only</strong> (the {@code template_version} telemetry field): targets are
+ * always derived from the graph, never from this field, so a stale or reordered chunk cannot
+ * offer the version it names.
+ *
  * <p>A 40,000-engagement firm becomes 80 chunks, each checkpointed on its own, so a crash or a
  * throttle resumes from the last unfinished chunk instead of redoing the firm.
  */
@@ -17,6 +22,7 @@ public record FanoutChunk(
         FirmId firmId,
         ProductId productId,
         Market market,
+        TemplateVersion templateVersion,
         long graphEpoch,
         int chunkIndex,
         int totalChunks,
@@ -30,6 +36,7 @@ public record FanoutChunk(
         Objects.requireNonNull(firmId, "firmId");
         Objects.requireNonNull(productId, "productId");
         Objects.requireNonNull(market, "market");
+        Objects.requireNonNull(templateVersion, "templateVersion");
         engagementIds = List.copyOf(Objects.requireNonNull(engagementIds, "engagementIds"));
         if (graphEpoch < 0) {
             throw new IllegalArgumentException("graphEpoch must be >= 0: " + graphEpoch);

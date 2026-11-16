@@ -50,6 +50,6 @@ class FanoutChunkTest {
     }
 
     private static FanoutChunk chunk(int index, int total, List<EngagementId> ids) {
-        return new FanoutChunk(PUBLISH, FIRM, PRODUCT, EU, 1, index, total, ids);
+        return new FanoutChunk(PUBLISH, FIRM, PRODUCT, EU, TemplateVersion.of("v7"), 1, index, total, ids);
     }
 }

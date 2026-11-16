@@ -188,7 +188,7 @@ class FanoutResilienceTest {
         @Test
         void poisonChunkClosesTheBreaker() {
             FanoutChunk poison = new FanoutChunk(f.single("pub", 2, ids).publishId(), FIRM,
-                    com.caseware.fanout.doubles.TestData.PRODUCT, Market.of("XX"), 2, 0, 1, ids);
+                    com.caseware.fanout.doubles.TestData.PRODUCT, Market.of("XX"), v("v7"), 2, 0, 1, ids);
             armProbe();
 
             assertThat(f.processor().process(poison)).isInstanceOf(FanoutResult.PoisonMessage.class);
@@ -246,7 +246,7 @@ class FanoutResilienceTest {
         void unknownLineageIsPoisonAndNeverTripsTheBreaker() {
             List<EngagementId> ids = f.seedRows(3, "v4");
             FanoutChunk unknownMarket = new FanoutChunk(f.single("pub", 2, ids).publishId(), FIRM,
-                    com.caseware.fanout.doubles.TestData.PRODUCT, Market.of("XX"), 2, 0, 1, ids);
+                    com.caseware.fanout.doubles.TestData.PRODUCT, Market.of("XX"), v("v7"), 2, 0, 1, ids);
 
             for (int i = 0; i < 5; i++) {
                 assertThat(f.processor().process(unknownMarket)).isInstanceOfSatisfying(FanoutResult.PoisonMessage.class, p -> {
