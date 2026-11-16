@@ -216,7 +216,7 @@ One immutable record per published summary, stored beside it in S3 Object Lock (
 | Ticket | Judge first-attempt pass rate under 90%; inference at 80% of the daily cap; drift in a single firm | Next business day |
 | Info | Circuit breaker opened or closed; backfill ETA change | Dashboard only |
 
-**Telemetry fields.** Every log line and trace carries `publish_id`, `product_id`, `template_version`, `firm_id` and `chunk_id`, never workpaper content.
+**Telemetry fields.** Every log line and trace carries `publish_id`, `product_id`, `template_version`, `firm_id` and `chunk_id`, never engagement content.
 
 **Operations.** The backfill dashboard shows coverage per firm, burn-down and ETA, and downstream health. The weekly synthetic canary publishes a test version end to end per region and asserts the SLOs. Runbooks cover DLQ replay, firm re-seed, backfill kill switch, tripping the inference cap, and re-evaluation after a withdrawal.
 
