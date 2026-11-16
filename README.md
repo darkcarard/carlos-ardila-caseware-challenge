@@ -51,7 +51,7 @@ Built with Claude Code under hard-stop rules ([.claude/rules](.claude/rules)).
 
 Parallel stress runs and PIT's slower instrumentation exposed them.
 
-**"Redundant" was not proof either.** To kill two mutants, the AI removed `releasePermission()` from the interrupted-load path. That would have leaked the half-open probe; a test caught it and the call was restored. The full triage is in [docs/2-mutation-testing.md](docs/2-mutation-testing.md).
+**"Redundant" was not proof either.** To kill two mutants, the AI removed `releasePermission()` from the interrupted-load path. That would have leaked the half-open probe; a test caught it and the call was restored. The full triage is in [docs/3-mutation-testing.md](docs/3-mutation-testing.md).
 
 **Guidance for engineers using AI here:**
 - Demand pasted test output.

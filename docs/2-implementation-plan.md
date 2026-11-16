@@ -130,7 +130,7 @@ This automates the manual mutation checks done in step 3.
 - (b) an equivalent mutant, so it is documented;
 - (c) dead code, so the code was removed.
 
-The score went from 79% to 95%. Details are in [2-mutation-testing.md](2-mutation-testing.md).
+The score went from 79% to 95%. Details are in [3-mutation-testing.md](3-mutation-testing.md).
 
 **Follow-up hardening.** `run()` now checks that every backfill item gets exactly one outcome. A missing item pages through `invariant.violation` and is re-delivered as `Deferred`.
 
