@@ -242,11 +242,15 @@ class FanoutChunkProcessorTest {
 
     @Test
     void fanoutCannotReachTheDownstreamLoaderByConstruction() {
+        // Explicit List<Class<?>>: Eclipse JDT (VS Code) rejects the inferred capture type that javac accepts.
         for (Constructor<?> constructor : FanoutChunkProcessor.class.getConstructors()) {
-            assertThat(Arrays.asList(constructor.getParameterTypes())).doesNotContain(DownstreamEngagementClient.class);
+            List<Class<?>> parameterTypes = Arrays.asList(constructor.getParameterTypes());
+            assertThat(parameterTypes).doesNotContain(DownstreamEngagementClient.class);
         }
-        assertThat(Arrays.stream(FanoutChunkProcessor.class.getDeclaredFields()).map(java.lang.reflect.Field::getType))
-                .doesNotContain(DownstreamEngagementClient.class);
+        List<Class<?>> fieldTypes = Arrays.stream(FanoutChunkProcessor.class.getDeclaredFields())
+                .<Class<?>>map(java.lang.reflect.Field::getType)
+                .toList();
+        assertThat(fieldTypes).doesNotContain(DownstreamEngagementClient.class);
     }
 
     private static SummaryPair pair(String from, String to, String locale) {
