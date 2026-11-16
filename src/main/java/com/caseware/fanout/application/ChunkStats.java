@@ -5,17 +5,21 @@ package com.caseware.fanout.application;
  *
  * @param evaluated rows evaluated by this invocation (from the resumed offset)
  * @param written rows whose conditional write was applied
- * @param unchanged rows that needed no write (same target, epoch already current, or locked)
+ * @param unchanged rows that needed no write (same target with the epoch already current, or locked)
  * @param superseded rows already evaluated at a newer graph epoch (stale work, acknowledged)
  * @param missing rows absent from the registry (deleted or not yet seeded)
+ * @param unresolvable rows whose base version is unknown to the graph. They are skipped and
+ *     alerted on, never poison the chunk, and the epoch-lag sweep re-evaluates them later.
  * @param conflictRetries re-read and recompute attempts caused by a {@code state_seq} race
  */
-public record ChunkStats(int evaluated, int written, int unchanged, int superseded, int missing, int conflictRetries) {
+public record ChunkStats(int evaluated, int written, int unchanged, int superseded, int missing,
+                         int unresolvable, int conflictRetries) {
 
-    public static final ChunkStats ZERO = new ChunkStats(0, 0, 0, 0, 0, 0);
+    public static final ChunkStats ZERO = new ChunkStats(0, 0, 0, 0, 0, 0, 0);
 
     public ChunkStats {
-        if (evaluated < 0 || written < 0 || unchanged < 0 || superseded < 0 || missing < 0 || conflictRetries < 0) {
+        if (evaluated < 0 || written < 0 || unchanged < 0 || superseded < 0 || missing < 0
+                || unresolvable < 0 || conflictRetries < 0) {
             throw new IllegalArgumentException("counters must be >= 0");
         }
     }
