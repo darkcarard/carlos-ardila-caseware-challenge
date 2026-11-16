@@ -5,12 +5,12 @@ This plan was agreed before any code was written. Each step ends with a green `.
 | Step | Scope | Commit | Status |
 | --- | --- | --- | --- |
 | 0 | Install JDK 21 and Maven, generate `./mvnw` (committed with step 1) | — | Done |
-| 1 | Maven project, immutable models, ports | `eb0fb12` | Done |
-| 2 | Pure `PendingTargetResolver`, property and edge-case tests | `8eb13bc` | Done |
-| 3 | `FanoutChunkProcessor`: conditional writes, checkpoints, resilience | `49d7930` | Done |
-| 4 | `BackfillWorkerService`: 100 global / 10 per-firm caps, circuit breaker | `772b7a1` | Done |
-| 5 | Mutation testing (PIT) and coverage floors | `828544f`, `e4101f5` | Done |
-| — | README | `d903bda`…`2b9f666` | Done |
+| 1 | Maven project, immutable models, ports | `f81d520` | Done |
+| 2 | Pure `PendingTargetResolver`, property and edge-case tests | `9ae223a` | Done |
+| 3 | `FanoutChunkProcessor`: conditional writes, checkpoints, resilience | `4b54bc4` | Done |
+| 4 | `BackfillWorkerService`: 100 global / 10 per-firm caps, circuit breaker | `0d7d945` | Done |
+| 5 | Mutation testing (PIT) and coverage floors | `645899a`, `8fa8569` | Done |
+| — | README | `d29655a`…`1c346c7` | Done |
 
 ---
 
