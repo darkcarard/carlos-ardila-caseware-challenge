@@ -21,17 +21,14 @@ This is the regional template-publish fan-out worker (Part 2), in plain Java 21.
   - When the circuit breaker opens, the remaining items are returned as deferred with a `retryAt`.
   - In a burst of 1,000 loads, ten small firms finish within the first 300 completions, ahead of an 800-item whale.
 
-## Tradeoffs and deviations from the rules
+## Deviations from `.claude/rules`
 
-| Decision | Why |
+| Rule | What I did, and why |
 | --- | --- |
-| **Backfill writes also guard `graph_epoch`** (the rules guard only `state_seq`) | A 1-minute load can straddle a withdrawal. Without this guard it would re-offer the withdrawn version. On a failed condition it re-derives without reloading. |
-| The stored epoch is the **graph snapshot's**, not the chunk's | With the chunk's epoch, a stale worker re-offered a withdrawn v7. A surviving mutant exposed this. |
-| A corrupt row is **quarantined**; a corrupt lineage **poisons the chunk** | One bad row must not send 499 healthy ones to the DLQ. Data errors never trip the breaker. |
-| Summary pairs are **flushed before each checkpoint** | Otherwise a crash after a checkpoint loses pairs the resumed run never sees. |
-| Reachability ignores status; ties break by `graphSeq` | A withdrawn v6 must not hide v7, and "latest" must be deterministic across branches. |
-| The kill switch is seen within **one load completion** (under 1 min) | With every slot busy, the dispatcher has no earlier point to check it. In-flight loads are interrupted. |
-| A dropped backfill item **pages and is re-delivered** | Every item must get exactly one outcome. Mutation testing showed that a dispatcher bug would otherwise lose one silently. |
+| §3: backfill writes guard only `state_seq` | **They also guard `graph_epoch`.** A 1-minute load can straddle a withdrawal, and without the guard it re-offers the withdrawn version. On a failed condition the worker re-derives without reloading. |
+| §3: set `graph_epoch = incomingGraphEpoch` | **It stores the epoch of the graph snapshot used for the derivation**, not the chunk's. With the chunk's epoch, a stale worker re-offered a withdrawn v7. A surviving mutant exposed this. |
+| §4: corrupt data goes to the DLQ | **A corrupt row is quarantined (`unresolvable`); only a corrupt lineage poisons the chunk.** One bad row must not send 499 healthy ones to the DLQ. |
+| §2: "latest in topological/version ordering" | **Reachability ignores status, and ties break by `graphSeq`.** A withdrawn v6 must not hide a published v7 behind it, and "latest" must be deterministic across branches. |
 
 **Out of scope:**
 - the SQS adapter (sending to the DLQ after N receives);
