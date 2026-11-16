@@ -10,16 +10,8 @@ This is the regional template-publish fan-out worker (Part 2), in plain Java 21.
 
 ## Two paths, kept apart by types
 
-- **`FanoutChunkProcessor` (publish and withdraw)** runs against the registry only. Its constructor does not accept a `DownstreamEngagementClient`, so a publish makes zero loads by construction.
-  - Writes require `state_seq = :seen AND graph_epoch <= :epoch`.
-  - When that condition fails because a newer epoch is stored, the chunk acks the row as superseded. When it fails because `state_seq` changed, it re-derives the row and retries, up to 3 times, then returns `PartialRetry`.
-  - Each (publish, firm, chunk) has a cursor checkpointed every 50 rows, so a crash at row 250 resumes at row 250.
-- **`BackfillWorkerService` (backfill and reconciliation)** is the only caller of the ~1-minute loader.
-  - The limiter takes the per-firm permit before the global one: at most 10 per firm and 100 in total.
-  - One dispatcher serves firms in round-robin and runs each load on a virtual thread. It blocks only on load completions, never on time.
-  - It checks the kill switch before every acquisition and after every completion.
-  - When the circuit breaker opens, the remaining items are returned as deferred with a `retryAt`.
-  - In a burst of 1,000 loads, ten small firms finish within the first 300 completions, ahead of an 800-item whale.
+- **`FanoutChunkProcessor` (publish and withdraw).** It never calls the ~1-minute loader: its constructor does not accept one. Writes are conditional on `state_seq` and `graph_epoch`, and progress is checkpointed per (publish, firm, chunk), so a crash resumes where it stopped.
+- **`BackfillWorkerService` (backfill and reconciliation).** It is the only caller of the loader, capped at 10 loads per firm and 100 in total. Firms are served round-robin on virtual threads, behind a kill switch and a circuit breaker.
 
 ## Deviations from `.claude/rules`
 
