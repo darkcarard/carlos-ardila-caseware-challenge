@@ -22,6 +22,13 @@ public interface CircuitBreaker {
 
     void recordFailure();
 
+    /**
+     * Gives back a permission whose call produced no outcome, for example a load cancelled by the
+     * kill switch before it ran. It frees a {@code HALF_OPEN} probe slot without changing state,
+     * so a cancelled probe cannot wedge the breaker.
+     */
+    void releasePermission();
+
     State state();
 
     /** Returns the time left before an {@code OPEN} breaker admits a probe; zero otherwise. */

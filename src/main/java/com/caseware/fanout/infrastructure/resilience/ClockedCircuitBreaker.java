@@ -97,6 +97,13 @@ public final class ClockedCircuitBreaker implements CircuitBreaker {
     }
 
     @Override
+    public synchronized void releasePermission() {
+        if (state == State.HALF_OPEN) {
+            probeInFlight = false;
+        }
+    }
+
+    @Override
     public synchronized State state() {
         return state;
     }

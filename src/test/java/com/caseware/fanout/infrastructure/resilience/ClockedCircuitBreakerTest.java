@@ -78,6 +78,26 @@ class ClockedCircuitBreakerTest {
     }
 
     @Test
+    void releasingACancelledProbeFreesTheSlotWithoutClosing() {
+        fail(3);
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(breaker.tryAcquirePermission()).isTrue();
+        breaker.releasePermission();
+        assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
+        assertThat(breaker.tryAcquirePermission()).isTrue(); // a new probe may go
+    }
+
+    @Test
+    void releasingWhileClosedOrOpenIsANoOp() {
+        breaker.releasePermission();
+        assertThat(breaker.state()).isEqualTo(State.CLOSED);
+        fail(3);
+        breaker.releasePermission();
+        assertThat(breaker.state()).isEqualTo(State.OPEN);
+        assertThat(breaker.tryAcquirePermission()).isFalse();
+    }
+
+    @Test
     void rejectsInvalidConfiguration() {
         assertThatIllegalArgumentException().isThrownBy(() -> new ClockedCircuitBreaker(clock, 0, Duration.ofSeconds(1)));
         assertThatIllegalArgumentException().isThrownBy(() -> new ClockedCircuitBreaker(clock, 1, Duration.ZERO));
