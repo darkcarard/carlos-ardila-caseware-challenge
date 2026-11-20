@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flujos del Fan-Out</title>
+<style>
+:root{
+  --bg:#f5f6fa;--surface:#ffffff;--surface2:#eef1f7;--text:#121726;--muted:#5a6478;--line:#d6dbe7;--edge:#a6afc4;
+  --accent:#3563f0;--accent-soft:#e5ecff;--green:#0f9d68;--green-soft:#e0f5ec;--amber:#c97f00;--amber-soft:#fff2d8;
+  --red:#dc3f34;--red-soft:#fde6e4;--violet:#7547f5;--violet-soft:#eee7ff;--zone-g:#eef2ff;--zone-r:#ecf8f2;
+  --node:#ffffff;--pkt-bg:#ffffff;--shadow:0 1px 2px rgba(16,24,40,.05),0 10px 30px rgba(16,24,40,.07);
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0a0d16;--surface:#111625;--surface2:#171e31;--text:#e6e9f2;--muted:#959fb6;--line:#262f47;--edge:#4a5574;
+  --accent:#7193ff;--accent-soft:rgba(113,147,255,.15);--green:#34d399;--green-soft:rgba(52,211,153,.13);--amber:#fbbf24;--amber-soft:rgba(251,191,36,.13);
+  --red:#f87171;--red-soft:rgba(248,113,113,.14);--violet:#a78bfa;--violet-soft:rgba(167,139,250,.16);--zone-g:rgba(113,147,255,.06);--zone-r:rgba(52,211,153,.05);
+  --node:#141a2b;--pkt-bg:#0e1320;--shadow:0 0 0 1px rgba(255,255,255,.02);
+}}
+:root[data-theme="dark"]{
+  --bg:#0a0d16;--surface:#111625;--surface2:#171e31;--text:#e6e9f2;--muted:#959fb6;--line:#262f47;--edge:#4a5574;
+  --accent:#7193ff;--accent-soft:rgba(113,147,255,.15);--green:#34d399;--green-soft:rgba(52,211,153,.13);--amber:#fbbf24;--amber-soft:rgba(251,191,36,.13);
+  --red:#f87171;--red-soft:rgba(248,113,113,.14);--violet:#a78bfa;--violet-soft:rgba(167,139,250,.16);--zone-g:rgba(113,147,255,.06);--zone-r:rgba(52,211,153,.05);
+  --node:#141a2b;--pkt-bg:#0e1320;--shadow:0 0 0 1px rgba(255,255,255,.02);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+code,.mono{font-family:var(--mono);font-size:.92em}
+code{background:var(--surface2);padding:1px 5px;border-radius:5px}
+button{font:inherit;color:inherit}
+html,body{height:100%}
+body{display:flex;flex-direction:column;overflow:hidden}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--surface);flex:none}
+header .brand{flex:none}
+header h1{font-size:15px;margin:0;letter-spacing:-.01em;white-space:nowrap}
+header p{margin:0;color:var(--muted);font-size:12px;white-space:nowrap}
+.icon-btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;height:34px;min-width:34px;padding:0 10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.icon-btn:hover{border-color:var(--accent)}
+nav{display:flex;gap:4px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:thin}
+nav button{display:flex;gap:8px;align-items:center;white-space:nowrap;border:1px solid transparent;background:transparent;border-radius:10px;padding:7px 11px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);flex:none}
+nav button:hover{background:var(--surface2);color:var(--text)}
+nav button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--text)}
+nav .n{width:20px;height:20px;border-radius:6px;background:var(--surface2);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--muted)}
+nav button.on .n{background:var(--accent);color:#fff}
+.app{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) clamp(320px,30vw,440px);gap:14px;padding:14px 16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.stage-card{overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.stage-head{display:flex;justify-content:space-between;align-items:center;gap:6px 14px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;flex:none}
+.stage-head h2{margin:0;font-size:15px}
+.stage-head p{margin:1px 0 0;color:var(--muted);font-size:12.5px}
+.legend{display:flex;gap:4px 12px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.stage-wrap{flex:1;min-height:180px;position:relative}
+svg#stage{position:absolute;inset:6px 8px;width:calc(100% - 16px);height:calc(100% - 12px);display:block}
+.controls{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--line);flex-wrap:wrap;flex:none}
+.side{display:flex;flex-direction:column;gap:14px;min-height:0}
+.side .narr{flex:none;max-height:55%;overflow:auto}
+.side .insp{flex:1;min-height:0;overflow:auto}
+.controls .play{background:var(--accent);color:#fff;border-color:var(--accent);min-width:90px}
+.dots{display:flex;gap:6px;flex:1;min-width:120px;flex-wrap:wrap;justify-content:center}
+.dots button{width:26px;height:6px;border-radius:4px;border:0;background:var(--line);cursor:pointer;padding:0}
+.dots button.done{background:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.dots button.on{background:var(--accent)}
+select{font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:10px;height:34px;padding:0 8px}
+.narr{padding:16px 18px}
+.narr .k{font-size:12px;color:var(--accent);font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.narr h3{margin:4px 0 8px;font-size:18px;letter-spacing:-.01em}
+.narr .txt{color:var(--text)}
+.narr .txt p{margin:0 0 8px}
+.insp{padding:16px 18px}
+.insp-h{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+.fade-in{animation:fi .35s ease}
+@keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+#widget{border-top:1px solid var(--line);flex:none;max-height:48%;overflow:auto}
+#widget[hidden]{display:none}
+
+/* svg */
+.zone{stroke:var(--line);stroke-dasharray:6 6;stroke-width:1.2}
+.zone.g{fill:var(--zone-g)} .zone.r{fill:var(--zone-r)} .zone.n{fill:transparent}
+.zone-label{fill:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.06em}
+.boundary{stroke:var(--red);stroke-width:1.5;stroke-dasharray:3 6;opacity:.7}
+.boundary-label{fill:var(--red);font-size:11px;font-weight:600}
+.edge{stroke:var(--edge);stroke-width:1.6;fill:none}
+.edge.dash{stroke-dasharray:5 6;opacity:.7}
+.edge-label{fill:var(--muted);font-size:10.5px}
+#arr path{fill:var(--edge)}
+.node .box{fill:var(--node);stroke:var(--line);stroke-width:1.5;transition:fill .4s,stroke .4s,opacity .4s}
+.node{transition:opacity .45s}
+.node .t{fill:var(--text);font-size:13px;font-weight:650;text-anchor:middle}
+.node .s{fill:var(--muted);font-size:11px;text-anchor:middle}
+.node .tag rect{fill:var(--accent)} .node .tag text{fill:#fff;font-size:10.5px;font-weight:700;text-anchor:middle}
+.node .tag{transition:opacity .3s}
+.node.hidden{opacity:0}
+.node.dim{opacity:.38}
+.node.active .box,.node.base .box{fill:var(--accent-soft);stroke:var(--accent)}
+.node.ok .box{fill:var(--green-soft);stroke:var(--green)}   .node.ok .tag rect{fill:var(--green)}
+.node.warn .box,.node.declined .box{fill:var(--amber-soft);stroke:var(--amber)} .node.warn .tag rect,.node.declined .tag rect{fill:var(--amber)}
+.node.bad .box{fill:var(--red-soft);stroke:var(--red)} .node.bad .tag rect{fill:var(--red)}
+.node.pending .box{fill:var(--violet-soft);stroke:var(--violet)} .node.pending .tag rect{fill:var(--violet)}
+.node.withdrawn .box{fill:var(--red-soft);stroke:var(--red);stroke-dasharray:5 4} .node.withdrawn .tag rect{fill:var(--red)} .node.withdrawn .t{text-decoration:line-through}
+.node.locked .box{fill:var(--surface2);stroke:var(--muted)} .node.locked .tag rect{fill:var(--muted)}
+.node.dim .tag rect{fill:var(--muted)}
+.node.focus .box{stroke-width:2.6}
+.node.focus .body{filter:drop-shadow(0 0 10px color-mix(in srgb,var(--accent) 45%,transparent))}
+.node .body{transform-box:fill-box;transform-origin:center}
+.node.pulse .body{animation:pulse .5s ease}
+@keyframes pulse{0%{transform:scale(1)}40%{transform:scale(1.06)}100%{transform:scale(1)}}
+.pkt circle{stroke:var(--pkt-bg);stroke-width:2}
+.pkt .pill{fill:var(--pkt-bg);stroke-width:1.3}
+.pkt text{font-size:11px;font-family:var(--mono);fill:var(--text)}
+.k-evt{--c:var(--accent)} .k-safe{--c:var(--green)} .k-write{--c:var(--violet)} .k-bad{--c:var(--red)} .k-load{--c:var(--amber)}
+.pkt circle{fill:var(--c)} .pkt .pill{stroke:var(--c)}
+.pkt .halo{fill:var(--c);opacity:.25}
+
+/* inspector widgets */
+.kvs{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
+.kvs .h{background:var(--surface2);padding:7px 12px;font-size:12px;font-weight:700;color:var(--muted);display:flex;justify-content:space-between}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 12px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12.5px}
+.kv span{color:var(--muted)}
+.kv b{font-weight:600;text-align:right}
+.kv.chg{background:var(--violet-soft)}
+.kv.chg b{color:var(--violet)}
+.cond{border-radius:12px;padding:10px 12px;margin-bottom:10px;border:1px solid;display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.cond code{background:transparent;padding:0;font-size:12.5px}
+.cond.ok{border-color:var(--green);background:var(--green-soft)} .cond.ok .v{color:var(--green)}
+.cond.bad{border-color:var(--red);background:var(--red-soft)} .cond.bad .v{color:var(--red)}
+.cond .v{font-weight:700;white-space:nowrap;font-size:12.5px}
+.cond small{display:block;color:var(--muted);margin-top:3px}
+.note{color:var(--muted);font-size:13px;margin:6px 0 10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:10px}
+.stat{background:var(--surface2);border-radius:12px;padding:10px 12px}
+.stat b{display:block;font-size:20px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:12px;line-height:1.3;display:block}
+.stat.hl b{color:var(--green)}
+.list{margin:0 0 10px;padding:0;list-style:none}
+.list li{display:flex;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.list li:last-child{border-bottom:0}
+.list .i{flex:0 0 18px;font-weight:700}
+.list .y{color:var(--green)} .list .x{color:var(--red)} .list .w{color:var(--amber)}
+.bar{height:12px;border-radius:8px;background:var(--surface2);overflow:hidden;margin:6px 0 4px;position:relative}
+.bar i{display:block;height:100%;border-radius:8px;background:var(--accent);animation:grow 2.2s ease forwards}
+.bar i.r{background:var(--red)} .bar i.g{background:var(--green)}
+@keyframes grow{from{width:var(--from)}to{width:var(--to)}}
+.bar-l{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+.chip{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;font-family:var(--mono)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip.okc{background:var(--green-soft);border-color:var(--green);color:var(--green)}
+.chip.badc{background:var(--red-soft);border-color:var(--red);color:var(--red)}
+.chip.warnc{background:var(--amber-soft);border-color:var(--amber);color:var(--amber)}
+.arrow{color:var(--muted)}
+pre.code{margin:0 0 10px;background:var(--surface2);border-radius:12px;padding:10px 12px;font-family:var(--mono);font-size:12px;line-height:1.5;overflow-x:auto;white-space:pre}
+pre.code .c{color:var(--muted)} pre.code .k{color:var(--violet)} pre.code .g{color:var(--green)}
+.diff li{font-family:var(--mono);font-size:12px}
+.lbl{font-family:system-ui,sans-serif;font-size:11px;border-radius:6px;padding:0 6px;background:var(--amber-soft);color:var(--amber);font-weight:700;margin-left:auto;white-space:nowrap}
+.lbl.n{background:var(--accent-soft);color:var(--accent)}
+
+/* capacity sim */
+.cap{padding:10px 16px 12px}
+.cap-top{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:start}
+.cap-grid{display:grid;grid-template-columns:repeat(10,11px);gap:3px}
+.cap-grid div{width:11px;height:11px;border-radius:3px;background:var(--surface2);transition:background .15s}
+.cap-firms{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))!important;gap:6px!important}
+.firm{padding:5px 8px!important;font-size:11px!important}
+.cap-ctl{margin-top:8px!important}
+.cap-ctl .icon-btn{height:28px;font-size:12px}
+.inv{margin:0 0 8px!important}
+.cap-h{margin-bottom:8px!important}
+.cap-h h3{font-size:13px!important}
+.cap-grid div.w{background:var(--amber)} .cap-grid div.s{background:var(--accent)} .cap-grid div.n{background:var(--green)}
+.cap-firms{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.firm{background:var(--surface2);border-radius:10px;padding:8px 10px;font-size:12px}
+.firm .top{display:flex;justify-content:space-between;font-family:var(--mono)}
+.firm .bar{height:6px;margin:5px 0 3px}
+.firm .bar i{animation:none;transition:width .2s}
+.firm.whale{grid-column:1/-1}
+.firm.whale .bar i{background:var(--amber)} .firm.newf .bar i{background:var(--green)}
+.firm .cap10{display:flex;gap:2px;margin-top:4px}
+.firm .cap10 span{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.firm .cap10 span.on{background:var(--text)}
+.cap-ctl{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.cap-ctl .kill.on{background:var(--red);border-color:var(--red);color:#fff}
+.inv{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.cap-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.cap-h h3{margin:0;font-size:15px}
+.cap-h small{color:var(--muted)}
+
+@media (max-width:900px){
+  body{overflow:auto;display:block}
+  header{flex-wrap:wrap}
+  nav{flex-basis:100%;order:3}
+  .app{grid-template-columns:minmax(0,1fr)}
+  .stage-wrap{overflow-x:auto;min-height:0}
+  svg#stage{position:static;width:100%;min-width:640px;height:auto;margin:6px 0}
+  .side .narr{max-height:none}
+  #widget{max-height:none}
+  .cap-top{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Fan-out · flujos animados</h1>
+    <p>basado en docs/1-design-document.md</p>
+  </div>
+  <nav id="nav" aria-label="Flujos" role="tablist"></nav>
+  <button class="icon-btn" id="theme" title="Cambiar tema">◐</button>
+</header>
+
+<div class="app">
+    <section class="card stage-card">
+      <div class="stage-head">
+        <div><h2 id="sTitle"></h2><p id="sSub"></p></div>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>evento / lectura</span>
+          <span><i style="background:var(--green)"></i>sin IDs (cruza planos)</span>
+          <span><i style="background:var(--violet)"></i>escritura condicional</span>
+          <span><i style="background:var(--red)"></i>conflicto / fallo</span>
+          <span><i style="background:var(--amber)"></i>carga downstream ~1 min</span>
+        </div>
+      </div>
+      <div class="stage-wrap"><svg id="stage" viewBox="0 0 1000 540" role="img" aria-label="Diagrama animado del flujo"></svg></div>
+      <div id="widget" hidden></div>
+      <div class="controls">
+        <button class="icon-btn" id="prev" title="Paso anterior (←)">◀</button>
+        <button class="icon-btn play" id="play" title="Reproducir / pausar (espacio)">▶ Play</button>
+        <button class="icon-btn" id="next" title="Paso siguiente (→)">▶▶</button>
+        <button class="icon-btn" id="replay" title="Repetir paso">↺</button>
+        <div class="dots" id="dots"></div>
+        <select id="speed" title="Velocidad">
+          <option value="0.6">0.6×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option>
+        </select>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="card narr">
+        <div class="k" id="nStep"></div>
+        <h3 id="nTitle"></h3>
+        <div class="txt" id="nText"></div>
+      </section>
+      <section class="card insp">
+        <div class="insp-h">Inspector</div>
+        <div id="panel"></div>
+      </section>
+    </aside>
+</div>
+
+<script>
+/* ---------- helpers for inspector panels ---------- */
+const row=(title,o,ch=[])=>`<div class="kvs"><div class="h"><span>${title}</span></div>${Object.entries(o).map(([k,v])=>`<div class="kv ${ch.includes(k)?'chg':''}"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+const cond=(c,ok,small='')=>`<div class="cond ${ok?'ok':'bad'}"><div><code>${c}</code>${small?`<small>${small}</small>`:''}</div><span class="v">${ok?'✓ pasa':'✗ falla'}</span></div>`;
+const note=t=>`<p class="note">${t}</p>`;
+const stats=a=>`<div class="stats">${a.map(([b,s,h])=>`<div class="stat ${h?'hl':''}"><b>${b}</b><span>${s}</span></div>`).join('')}</div>`;
+const list=a=>`<ul class="list">${a.map(([i,t])=>`<li><span class="i ${i==='✓'?'y':i==='✗'?'x':'w'}">${i}</span><span>${t}</span></li>`).join('')}</ul>`;
+const bar=(from,to,l,r='',cls='')=>`<div class="bar-l"><span>${l}</span><span>${r}</span></div><div class="bar"><i class="${cls}" style="--from:${from};--to:${to};width:${to}"></i></div>`;
+const chips=a=>`<div class="chips">${a.map(([t,c])=>c==='→'?`<span class="arrow">→</span>`:`<span class="chip ${c||''}">${t}</span>`).join('')}</div>`;
+const code=t=>`<pre class="code">${t}</pre>`;
+
+/* ---------- scenes ---------- */
+const SCENES=[
+/* 1 ─────────────────────────────── */
+{
+  id:'publish', nav:'Publish fan-out', blurb:'Del publish al badge: 0 cargas downstream',
+  title:'Publish fan-out (solo registry)', sub:'Un publish nunca carga un engagement: solo toca el registry regional y la proyección del grafo.',
+  zones:[{x:20,y:20,w:960,h:135,l:'PLANO GLOBAL · solo datos de plantilla, cero firm / engagement IDs',k:'g'},
+         {x:20,y:195,w:960,h:330,l:'PLANO REGIONAL · eu-central-1 · los IDs nunca salen de aquí',k:'r'}],
+  lines:[{x1:20,y1:175,x2:980,y2:175,l:'frontera de residencia · cuentas + IAM'}],
+  nodes:[
+    {id:'TDB',x:150,y:95,l:'Template DB',sub:'hooks publish / withdraw'},
+    {id:'BUS',x:500,y:95,l:'Event bus global',sub:'graph_seq por producto'},
+    {id:'SUM',x:830,y:95,l:'Diff + Summary',sub:'S3 Object Lock'},
+    {id:'G',x:150,y:285,l:'Version graph',sub:'proyección · epoch 8'},
+    {id:'P',x:500,y:258,l:'Chunk planner',sub:'GSI-2 por shard'},
+    {id:'Q',x:150,y:450,l:'SQS + DLQ',sub:'1 mensaje / chunk'},
+    {id:'W',x:500,y:375,l:'Fan-out worker',sub:'circuit breaker'},
+    {id:'R',x:830,y:285,l:'Registry DynamoDB',sub:'conditional writes'},
+    {id:'D',x:830,y:450,l:'Dashboard / API',sub:'p99 < 500 ms'},
+    {id:'ENG',x:500,y:482,l:'Engagement loader',sub:'~1 min / archivo',s:'dim'},
+  ],
+  edges:[['TDB','BUS'],['BUS','SUM'],['BUS','G'],['G','P'],['P','R'],['P','Q'],['Q','W'],['G','W'],['W','R'],['W','SUM'],['R','D'],['W','ENG',{dash:1}]],
+  steps:[
+    {k:'Origen',t:'El equipo de contenido publica v7',hi:['TDB'],
+     x:`<p>El hook <code>published</code> sale por el outbox del Template DB con un <code>graph_seq</code> monotónico por producto, para que cada región aplique los cambios del grafo <b>en orden</b>.</p><p>El evento solo describe la plantilla: no sabe nada de firmas ni engagements.</p>`,
+     p:[{f:'TDB',t:'BUS',l:'published v7 · graph_seq 42',k:'evt'}],
+     panel:row('Evento published',{product_id:'audit-ca',market:'CA',version:'v7',parents:'[v5]',status:'PUBLISHED',graph_seq:'42',graph_epoch:'9'})+note('Cero <code>firm_id</code> / <code>engagement_id</code>: el plano global no los conoce.')},
+    {k:'Contrato cross-plane',t:'Solo metadatos cruzan a la región',hi:['G'],set:{G:{s:'ok',sub:'proyección · epoch 9'}},
+     x:`<p>La región recibe la tupla <code>(product_id, market, version, parents, status, graph_seq, graph_epoch)</code> y actualiza su <b>proyección del grafo de versiones</b>: un grafo pequeño, sin contenido de plantilla.</p>`,
+     p:[{f:'BUS',t:'G',l:'v7 · parents [v5] · epoch 9',k:'safe'}],
+     panel:code(`<span class="c">// inbound a la región (sin IDs)</span>
+(<span class="k">product_id</span>, <span class="k">market</span>, <span class="k">version</span>,
+ <span class="k">parents</span>, <span class="k">status</span>, <span class="k">graph_seq</span>, <span class="k">graph_epoch</span>)`)+note('Si el plano global cae, la región sigue sirviendo desde el registry y los eventos esperan en el outbox de origen.')},
+    {k:'Planificación',t:'GSI-2 encuentra los afectados y los parte en chunks',hi:['P','Q'],set:{Q:{s:'active',sub:'80 chunks · firma whale'}},
+     x:`<p>El planner consulta <b>GSI-2</b> (<code>product_id#market#shard(0..15)</code>) — el sufijo de shard evita una hot key — y agrupa por firma en chunks de <b>como máximo 500 filas</b>, un mensaje SQS por chunk.</p>`,
+     p:[{f:'G',t:'P',l:'v7 publicado',k:'evt'},{f:'P',t:'R',l:'query GSI-2 · 16 shards',k:'evt',d:1000},{f:'R',t:'P',l:'firm#engagement ids',k:'evt',d:2100},{f:'P',t:'Q',l:'chunks ≤ 500 filas',k:'evt',d:3200}],
+     panel:stats([['40,000','filas de la firma más grande'],['80','chunks para esa firma'],['1','chunk para la firma mediana (~40)'],['16','shards en GSI-2']])+note('Un mensaje = <code>(publish_id, firm_id, chunk_index)</code>. Firmas grandes y pequeñas avanzan en paralelo.')},
+    {k:'Ejecución',t:'Un worker toma un chunk',hi:['W'],set:{W:{s:'active'}},
+     x:`<p>El worker hace pull de un mensaje. Si el circuit breaker está abierto, <b>no hace pull</b>. Lee el cursor de ese <code>(publish, firm, chunk)</code> para saber desde qué fila empezar.</p>`,
+     p:[{f:'Q',t:'W',l:'chunk 17/80 · F-0042',k:'evt'}],
+     panel:row('FanoutChunk',{publish_id:'pub-7f3a',firm_id:'F-0042',chunk_index:'17',rows:'500',cursor:'0',graph_epoch:'9',template_version:'v7'})},
+    {k:'Dominio puro',t:'PendingTargetResolver deriva pending_target',hi:['W','G'],
+     x:`<p>Función <b>pura</b> de <code>(base_version, declined_versions, locked, graph)</code>: el último descendiente <b>PUBLISHED</b> de <code>base_version</code> en el lineage del market, que no esté declinado. “Último” = mayor <code>graph_seq</code>.</p><p>Aquí: base v4, v5 declinada → el objetivo es <b>v7</b>.</p>`,
+     p:[{f:'G',t:'W',l:'snapshot epoch 9',k:'evt'}],
+     panel:row('Fila leída (antes)',{base_version:'v4',declined_versions:'[v5]',locked:'false',state_seq:'12',graph_epoch:'8',pending_target:'—'})+code(`resolve(record, graph) <span class="c">// sin I/O</span>
+  locked?              → empty
+  descendants(v4)      → {v5, v6, v7}
+  status = PUBLISHED   → {v5, v7}   <span class="c">// v6 withdrawn</span>
+  ∉ declined [v5]      → {v7}
+  max(graph_seq)       → <span class="g">v7</span>`)},
+    {k:'Escritura',t:'Escritura condicional en el registry',hi:['W','R'],set:{R:{s:'ok',sub:'pending_target = v7'}},
+     x:`<p>Nunca un <code>save()</code> incondicional. El worker escribe solo si nadie tocó la fila (<code>state_seq</code>) y si no existe una época de grafo más nueva (<code>graph_epoch</code>).</p><p>Escribe la época del <b>snapshot del que derivó</b> el objetivo.</p>`,
+     p:[{f:'W',t:'R',l:'pending_target = v7',k:'write'}],
+     panel:cond('state_seq = :seen(12) AND graph_epoch <= :epoch(9)',true)+row('Fila escrita (después)',{base_version:'v4',declined_versions:'[v5]',state_seq:'12',graph_epoch:'9',pending_target:'v7',pending_since:'2026-11-20T10:02Z'},['graph_epoch','pending_target','pending_since'])},
+    {k:'Pre-warm de resúmenes',t:'Pares de versión sin IDs suben al plano global',hi:['W','SUM'],set:{SUM:{s:'ok'}},
+     x:`<p>El worker ya conoce cada <code>(base_version → pending_target)</code> distinto. Publica esos pares <b>despojados de IDs</b> para que el resumen esté listo antes de que alguien abra el dashboard.</p><p>Los pares se publican <b>antes</b> de cada checkpoint: un reintento nunca los pierde.</p>`,
+     p:[{f:'W',t:'SUM',l:'(audit-ca, CA, v4→v7, fr-CA)',k:'safe'},{f:'W',t:'SUM',l:'(audit-ca, CA, v5→v7, fr-CA)',k:'safe',d:900}],
+     panel:row('SummaryPair (deduplicado)',{product_id:'audit-ca',market:'CA',from_version:'v4',to_version:'v7',locale:'fr-CA'})+note('El tipo <b>no tiene</b> campo <code>firmId</code>: la residencia se garantiza por tipos, no por convención.')+list([['✓','pares publicados'],['✓','luego checkpoint del cursor = 50'],['✓','continúa con la fila 51']])},
+    {k:'Resultado',t:'El dashboard muestra el badge',hi:['D','ENG'],set:{D:{s:'ok',tag:'badge: pending'},ENG:{tag:'0 cargas'}},
+     x:`<p>El dashboard lee el <b>GSI-1 sparse</b> (solo filas con <code>pending_target</code>), 50 por página, incluso para la firma de 40,000 archivos.</p><p>El loader de ~1 min nunca se llamó: <b>0 cargas downstream por publish</b>.</p>`,
+     p:[{f:'R',t:'D',l:'GSI-1 sparse · pending',k:'evt'}],
+     panel:stats([['0','cargas downstream por publish',1],['~3.3 min','40,000 filas a ~200 escrituras/s'],['p99 < 5 min','frescura del registry'],['p99 < 500 ms','lectura del dashboard']])+note('El badge llega en segundos típicamente; el resumen en &lt; 15 min p95 y accept/decline queda deshabilitado hasta tenerlo.')},
+  ]
+},
+/* 2 ─────────────────────────────── */
+{
+  id:'graph', nav:'Grafo de versiones', blurb:'Declinar, retirar, acumular, aislar markets',
+  title:'Semántica del grafo de versiones', sub:'Qué fija un “decline”, cómo se acumulan versiones y qué pasa con un withdrawal.',
+  nw:110, nh:50,
+  zones:[{x:20,y:30,w:960,h:300,l:'LINEAGE audit-ca · market CA',k:'g'},{x:20,y:355,w:960,h:160,l:'BRANCH · market EU (otro lineage)',k:'n'}],
+  nodes:[
+    {id:'v3',x:90,y:250,l:'v3'},{id:'v4',x:240,y:250,l:'v4'},
+    {id:'v5',x:420,y:170,l:'v5',s:'hidden'},{id:'v6',x:600,y:95,l:'v6',s:'hidden'},{id:'v7',x:600,y:250,l:'v7',s:'hidden'},{id:'v8',x:790,y:250,l:'v8',s:'hidden'},
+    {id:'e5',x:420,y:440,l:'v5·EU',s:'hidden'},{id:'e6',x:600,y:440,l:'v6·EU',s:'hidden'},
+  ],
+  edges:[['v3','v4'],['v4','v5'],['v5','v6'],['v5','v7'],['v7','v8'],['v4','e5'],['e5','e6']],
+  steps:[
+    {k:'Hook created',t:'El engagement nace en v4',set:{v4:{s:'base',tag:'base'}},hi:['v4'],
+     x:`<p>El hook <code>created</code> crea la fila con <code>base_version = v4</code>: la versión cuyo contenido <b>realmente está en el archivo</b>.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v4',declined_versions:'[]',state_seq:'3',graph_epoch:'8',locked:'false',pending_target:'—'})},
+    {k:'Publish',t:'Se publica v5 → pendiente',set:{v5:{s:'pending',tag:'pending_target'}},hi:['v5'],
+     p:[{f:'v4',t:'v5',l:'published · seq 40',k:'evt'}],
+     x:`<p>v5 es descendiente publicado de v4 → <code>pending_target = v5</code>. El usuario ve el badge y el resumen v4→v5.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v4',declined_versions:'[]',state_seq:'3',graph_epoch:'8',locked:'false',pending_target:'v5'},['pending_target'])},
+    {k:'Hook declined',t:'El usuario declina v5',set:{v5:{s:'declined',tag:'declined'}},hi:['v5','v4'],
+     x:`<p>Declinar <b>no fija contenido</b>: <code>base_version</code> sigue en v4 (el archivo no cambió). Solo se registra v5 en <code>declined_versions</code> para no volver a preguntar.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v4',declined_versions:'[v5]',state_seq:'4',graph_epoch:'8',locked:'false',pending_target:'—'},['declined_versions','state_seq','pending_target'])},
+    {k:'Publish',t:'v6 (hija de v5) aparece pendiente',set:{v6:{s:'pending',tag:'pending_target'}},hi:['v6'],
+     p:[{f:'v5',t:'v6',l:'published · seq 41',k:'evt'}],
+     x:`<p>La alcanzabilidad pasa <b>a través</b> de v5 aunque esté declinada: v6 contiene los cambios de v5 y más. El diff mostrado es <b>acumulativo desde la base</b>: v4→v6.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v4',declined_versions:'[v5]',state_seq:'4',graph_epoch:'8',locked:'false',pending_target:'v6'},['pending_target'])},
+    {k:'Withdrawal',t:'v6 se retira → la notificación se retracta',set:{v6:{s:'withdrawn',tag:'withdrawn'}},hi:['v6'],
+     x:`<p>El withdrawal sube el <code>graph_epoch</code> (8→9) y re-ejecuta el mismo fan-out. El resolver cae al anterior elegible: v5 está declinada, así que <b>no queda nada pendiente</b> y el badge desaparece.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v4',declined_versions:'[v5]',state_seq:'4',graph_epoch:'9',locked:'false',pending_target:'—'},['graph_epoch','pending_target'])+note('Si la versión retirada ya hubiera sido <b>aplicada</b>, se emite un advisory aparte (fuera de alcance).')},
+    {k:'Publish',t:'v7 (contiene v5) → pendiente con diff v4→v7',set:{v7:{s:'pending',tag:'pending_target'}},hi:['v7','v4'],
+     p:[{f:'v5',t:'v7',l:'published · seq 42',k:'evt'},{f:'v4',t:'v7',l:'diff acumulativo v4 → v7',k:'safe',d:1500}],
+     x:`<p>Varias actualizaciones acumuladas colapsan en <b>un</b> diff desde <code>base_version</code>. Los cambios de v5 que v7 lleva <b>sin modificar</b> se etiquetan “previously declined”; si v7 los volvió a cambiar, se muestran como nuevos.</p><p>La v6 retirada no oculta a sus hermanos ni a sus descendientes.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v4',declined_versions:'[v5]',state_seq:'4',graph_epoch:'10',pending_target:'v7'},['graph_epoch','pending_target'])+
+       `<div class="kvs"><div class="h"><span>Resumen v4 → v7 (vista regional)</span></div><ul class="list diff" style="padding:4px 12px;margin:0">
+        <li>§2.1 materiality threshold 5% → 3%<span class="lbl">previously declined</span></li>
+        <li>§4.2 nuevo procedimiento de confirmación<span class="lbl n">nuevo en v7</span></li>
+        <li>§5.3 texto modificado de nuevo en v7<span class="lbl n">nuevo en v7</span></li></ul></div>`},
+    {k:'Aislamiento de market',t:'La rama EU no afecta al engagement CA',set:{e5:{s:'dim',tag:'otro market'},e6:{s:'dim',tag:'otro market'}},hi:['e5','e6'],
+     p:[{f:'v4',t:'e5',l:'branch EU',k:'evt'}],
+     x:`<p>Los markets ramifican. Solo cuentan los descendientes en el lineage <code>(product_id, market)</code> del engagement: v5·EU y v6·EU se ignoran aunque sean descendientes de v4.</p>`,
+     panel:row('Registry row · e-981',{product_id:'audit-ca',market:'CA',base_version:'v4',pending_target:'v7'})},
+    {k:'Hook accepted',t:'El usuario acepta v7',set:{v4:{s:'idle',tag:''},v5:{s:'idle',tag:''},v7:{s:'base',tag:'base'}},hi:['v7'],
+     x:`<p><code>accepted</code> avanza <code>base_version</code> a v7 y elimina de <code>declined_versions</code> sus ancestros (v5 ya está incluida en la base).</p><p>El evento guarda el <code>summary_hash</code> que el usuario vio.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v7',declined_versions:'[]',state_seq:'5',graph_epoch:'10',locked:'false',pending_target:'—'},['base_version','declined_versions','state_seq','pending_target'])},
+    {k:'Hook finalized',t:'Archivo firmado: nunca más se ofrecen updates',set:{v7:{s:'locked',tag:'base · locked'},v8:{s:'dim',tag:'no se ofrece'}},hi:['v7','v8'],
+     p:[{f:'v7',t:'v8',l:'published · seq 43',k:'evt'}],
+     x:`<p><code>finalized</code> bloquea la fila: sale del índice de pendientes. Aunque se publique v8, el resolver devuelve <code>empty</code> para una fila <code>locked</code>.</p>`,
+     panel:row('Registry row · e-981',{base_version:'v7',declined_versions:'[]',state_seq:'6',graph_epoch:'11',locked:'true',pending_target:'—'},['state_seq','graph_epoch','locked'])},
+  ]
+},
+/* 3 ─────────────────────────────── */
+{
+  id:'races', nav:'Carreras', blurb:'state_seq y graph_epoch evitan pisar decisiones',
+  title:'Condiciones de carrera', sub:'Dos carreras reales y la condición DynamoDB que gana cada una.',
+  nw:190,
+  zones:[{x:20,y:30,w:960,h:210,l:'A · EL USUARIO DECIDE A MITAD DEL FAN-OUT',k:'g'},{x:20,y:325,w:960,h:190,l:'B · PUBLISH COMPITE CON UN WITHDRAWAL',k:'r'}],
+  nodes:[
+    {id:'W9',x:190,y:140,l:'Fan-out worker',sub:'publish v7 · epoch 9'},
+    {id:'R',x:540,y:282,l:'Registry row e-981',sub:'state_seq 12 · epoch 8'},
+    {id:'ENG',x:860,y:140,l:'Engagement system',sub:'outbox hook (usuario)'},
+    {id:'W10',x:190,y:425,l:'Withdrawal fan-out',sub:'withdraw v7 · epoch 10',s:'dim'},
+    {id:'G',x:860,y:425,l:'Version graph',sub:'epoch 9'},
+  ],
+  edges:[['W9','R'],['ENG','R'],['W10','R'],['G','W10']],
+  steps:[
+    {k:'Carrera A',t:'El worker lee la fila',hi:['W9','R'],
+     p:[{f:'R',t:'W9',l:'read · seq 12 · epoch 8',k:'evt'}],
+     x:`<p>El worker del publish de v7 lee la fila: <code>state_seq = 12</code>, base v4. Deriva <code>pending_target = v7</code> y se dispone a escribir esperando <code>state_seq = 12</code>.</p>`,
+     panel:row('Memoria del worker',{expectedStateSeq:'12',snapshotEpoch:'9',derived_target:'v7'})},
+    {k:'Carrera A',t:'Mientras tanto, el usuario acepta v5',hi:['ENG','R'],set:{R:{sub:'state_seq 13 · base v5'}},
+     p:[{f:'ENG',t:'R',l:'accepted v5 · seq 13',k:'evt'}],
+     x:`<p>El hook del engagement system llega primero. Su condición solo exige que el evento sea más nuevo que la fila, así que duplicados y desorden son no-ops.</p>`,
+     panel:cond('attribute_not_exists(state_seq) OR state_seq < :incoming(13)',true)+row('Fila',{base_version:'v5',state_seq:'13',graph_epoch:'8',pending_target:'—'},['base_version','state_seq'])},
+    {k:'Carrera A',t:'La escritura del worker falla',hi:['W9','R'],set:{W9:{s:'warn',tag:'conflict'}},
+     p:[{f:'W9',t:'R',l:'write v7 · expect seq 12',k:'write'},{f:'R',t:'W9',l:'ConditionalCheckFailed',k:'bad',d:1350}],
+     x:`<p>La fila ya está en <code>state_seq = 13</code>. DynamoDB rechaza la escritura: la decisión del usuario <b>no se pisa</b>.</p><p>No es un error fatal: es un <code>OptimisticLockConflict</code>.</p>`,
+     panel:cond('state_seq = :seen(12) AND graph_epoch <= :epoch(9)',false,'actual: state_seq = 13')},
+    {k:'Carrera A',t:'Re-lectura, recálculo y reintento',hi:['W9','R'],set:{W9:{s:'ok',tag:''},R:{s:'ok',sub:'base v5 · pending v7 · epoch 9'}},
+     p:[{f:'R',t:'W9',l:'re-read · seq 13 · epoch 8',k:'evt'},{f:'W9',t:'R',l:'write v7 · expect seq 13',k:'write',d:1400}],
+     x:`<p>Clasificación: la época de la fila (8) no supera la del snapshot (9) → no está superada. Cambió el <code>state_seq</code> → recalcular contra la fila fresca: desde base v5, el objetivo sigue siendo v7.</p><p>Reintento acotado (máx. 3).</p>`,
+     panel:list([['✓','current.graphEpoch (8) ≤ 9 → no superada'],['!','current.stateSeq (13) ≠ 12 → recalcular'],['✓','resolve(base v5) → v7']])+cond('state_seq = :seen(13) AND graph_epoch <= :epoch(9)',true)},
+    {k:'Carrera B',t:'v7 se retira: epoch 10',hi:['G','W10','R'],set:{G:{sub:'epoch 10',s:'warn'},W10:{s:'ok'},W9:{s:'idle'},R:{s:'idle',sub:'base v5 · pending — · epoch 10'}},
+     p:[{f:'G',t:'W10',l:'withdrawn v7 · epoch 10',k:'evt'},{f:'W10',t:'R',l:'pending — · epoch 10',k:'write',d:1350}],
+     x:`<p>El withdrawal sube la época y re-ejecuta el fan-out. Para esta fila no queda nada elegible: <code>pending_target</code> se borra y la notificación se retracta.</p>`,
+     panel:cond('state_seq = :seen(13) AND graph_epoch <= :epoch(10)',true)+row('Fila',{base_version:'v5',state_seq:'13',graph_epoch:'10',pending_target:'—'},['graph_epoch','pending_target'])},
+    {k:'Carrera B',t:'Llega tarde un chunk del publish (epoch 9)',hi:['W9','R'],set:{W9:{s:'warn',sub:'replay chunk · epoch 9',tag:'stale'}},
+     p:[{f:'W9',t:'R',l:'write v7 · epoch 9',k:'write'},{f:'R',t:'W9',l:'ConditionalCheckFailed',k:'bad',d:1350}],
+     x:`<p>Un worker lento o un replay de DLQ intenta escribir v7 con el snapshot viejo. Ni publish ni withdrawal cambian <code>state_seq</code>, así que <b>solo</b> el guard de época lo detiene.</p>`,
+     panel:cond('state_seq = :seen(13) AND graph_epoch <= :epoch(9)',false,'actual: graph_epoch = 10')},
+    {k:'Carrera B',t:'Superado: se hace ack y se descarta',hi:['W9'],set:{W9:{s:'dim',tag:'superseded · ack'}},
+     p:[{f:'R',t:'W9',l:'re-read · epoch 10 > 9',k:'evt'}],
+     x:`<p>La fila tiene una época más nueva → el worker hace <b>ack</b> como superado. La versión retirada <b>nunca se vuelve a ofrecer</b>. Sin este guard, el último en escribir ganaría.</p>`,
+     panel:list([['✗','current.graphEpoch (10) > 9 → superseded, ack'],['✓','v7 retirada no reaparece'],['✓','misma fila que una ejecución limpia']])},
+  ]
+},
+/* 4 ─────────────────────────────── */
+{
+  id:'resilience', nav:'Fallos y recuperación', blurb:'Checkpoints, duplicados, DLQ, circuit breaker',
+  title:'Fallos, idempotencia y recuperación', sub:'Cada escenario converge al mismo estado del registry que una ejecución limpia.',
+  nw:180,
+  nodes:[
+    {id:'Q',x:140,y:120,l:'SQS · chunk 17',sub:'visibility timeout'},
+    {id:'WA',x:470,y:120,l:'Worker A'},
+    {id:'CUR',x:820,y:120,l:'Cursor',sub:'(publish, firm, chunk)'},
+    {id:'DLQ',x:140,y:320,l:'DLQ',sub:'replay por runbook'},
+    {id:'WB',x:470,y:320,l:'Worker B'},
+    {id:'R',x:820,y:320,l:'Registry',sub:'DynamoDB'},
+    {id:'CB',x:470,y:480,l:'Circuit breaker',sub:'CLOSED'},
+  ],
+  edges:[['Q','WA'],['WA','CUR'],['Q','WB'],['WB','CUR'],['WB','R'],['Q','DLQ'],['WB','CB']],
+  steps:[
+    {k:'Normal',t:'Worker A procesa y hace checkpoint',hi:['WA'],set:{WA:{s:'active'},CUR:{sub:'cursor = 250'}},
+     p:[{f:'Q',t:'WA',l:'chunk 17 · 500 filas',k:'evt'},{f:'WA',t:'R',l:'writes condicionales',k:'write',d:1100},{f:'WA',t:'CUR',l:'checkpoint 250',k:'evt',d:2300}],
+     x:`<p>Checkpoint del offset cada ~50 filas en un cursor por <code>(publish_id, firm_id, chunk_index)</code>. Los pares de resumen se publican <b>antes</b> de cada checkpoint.</p>`,
+     panel:bar('0%','50%','filas procesadas','250 / 500')+note('La firma de 40,000 filas (80 chunks) puede reanudarse sin rehacer trabajo.')},
+    {k:'Crash',t:'Worker A muere en la fila 263',hi:['WA'],set:{WA:{s:'bad',tag:'crash @263'}},
+     x:`<p>No hubo ack, así que el mensaje vuelve a ser visible tras el visibility timeout. Las filas 250–262 ya se escribieron, pero el cursor dice 250.</p>`,
+     panel:bar('50%','52.6%','filas escritas','263 / 500','r')+note('Último checkpoint: <code>cursor = 250</code>')},
+    {k:'Reanudar',t:'Worker B retoma desde el cursor',hi:['WB'],set:{WB:{s:'ok'},CUR:{sub:'cursor = 500 ✓'}},
+     p:[{f:'Q',t:'WB',l:'redelivery chunk 17',k:'evt'},{f:'CUR',t:'WB',l:'cursor = 250',k:'evt',d:1200},{f:'WB',t:'R',l:'filas 250 … 499',k:'write',d:2400}],
+     x:`<p>Worker B empieza en 250, no en 0. Re-evaluar 250–262 produce el mismo resultado: mismo objetivo, <code>pending_since</code> preservado → escribir de nuevo es idempotente.</p>`,
+     panel:bar('50%','100%','filas procesadas','500 / 500','g')+list([['✓','sin efectos duplicados'],['✓','ack del mensaje']])},
+    {k:'Duplicado',t:'SQS entrega el chunk otra vez',hi:['WB','Q'],
+     p:[{f:'Q',t:'WB',l:'duplicado chunk 17',k:'evt'},{f:'CUR',t:'WB',l:'cursor = 500 (completo)',k:'evt',d:1200}],
+     x:`<p>SQS es at-least-once. El cursor marca el chunk como completo y, aunque no existiera, cada escritura es condicional y la derivación es pura: duplicados, desorden y replays de DLQ <b>convergen al mismo estado</b>.</p>`,
+     panel:stats([['= ','estado final idéntico a una ejecución limpia',1],['0','escrituras con efecto']])},
+    {k:'Fila corrupta',t:'Una fila mala se pone en cuarentena',hi:['WB'],set:{WB:{tag:'quarantine 1'}},
+     p:[{f:'R',t:'WB',l:'e-552 · base v3x ∉ graph',k:'bad'}],
+     x:`<p>Una <code>base_version</code> que no existe en el grafo es corrupción <b>de fila</b>: se cuenta como <code>unresolvable</code> y el chunk sigue. Una fila mala no manda 499 filas sanas a la DLQ.</p>`,
+     panel:stats([['499','filas resueltas',1],['1','unresolvable (cuarentena)']])},
+    {k:'Poison',t:'Lineage desconocido → DLQ',hi:['Q','DLQ'],set:{DLQ:{s:'bad',tag:'1 mensaje'}},
+     p:[{f:'Q',t:'WB',l:'chunk 18 · lineage ?',k:'evt'},{f:'WB',t:'Q',l:'PoisonMessage',k:'bad',d:1300},{f:'Q',t:'DLQ',l:'publishId · firmId · chunkId',k:'bad',d:2500}],
+     x:`<p>Corrupción <b>de chunk</b> (lineage desconocido, grafo inválido) es <code>NonRetryableData</code>: tras el máximo de intentos va a la DLQ con contexto estructurado. <b>No</b> dispara el circuit breaker.</p>`,
+     panel:row('Taxonomía de errores',{'Transient (429/5xx)':'retry + breaker','OptimisticLockConflict':'re-read (≤3)','NonRetryableData':'DLQ'})+note('SLO: ningún mensaje en la DLQ con más de 1 h.')},
+    {k:'Throttling',t:'429 del registry: el breaker se abre',hi:['CB','WB'],set:{CB:{s:'bad',sub:'OPEN',tag:'sin pull'},WB:{s:'warn',tag:'PartialRetry'}},
+     p:[{f:'R',t:'WB',l:'429 throttled',k:'bad'},{f:'WB',t:'CB',l:'TransientInfrastructure',k:'bad',d:1200}],
+     x:`<p>Los errores transitorios abren el breaker: los workers <b>dejan de hacer pull</b>. El chunk vuelve como <code>PartialRetry</code> (nack con backoff) y conserva su cursor.</p><p>RetryPolicy <b>calcula</b> los delays con jitter determinista: nunca duerme.</p>`,
+     panel:chips([['CLOSED'],['','→'],['OPEN','badc'],['','→'],['HALF_OPEN'],['','→'],['CLOSED']])+code(`attempt 1 → 1.0 s + jitter(seed)
+attempt 2 → 2.0 s + jitter(seed)
+attempt 3 → 4.0 s + jitter(seed)   <span class="c">// sin Thread.sleep</span>`)},
+    {k:'Recuperación',t:'HALF_OPEN → sonda → CLOSED',hi:['CB','WB'],set:{CB:{s:'ok',sub:'CLOSED',tag:''},WB:{s:'ok',tag:''}},
+     p:[{f:'WB',t:'R',l:'sonda (half-open)',k:'write'},{f:'CUR',t:'WB',l:'reanuda desde cursor',k:'evt',d:1300}],
+     x:`<p>Tras el cooldown, medido con un <code>Clock</code> inyectable, el breaker pasa a HALF_OPEN y deja pasar una sonda. Si funciona, se cierra y los workers reanudan desde su cursor.</p>`,
+     panel:chips([['CLOSED'],['','→'],['OPEN'],['','→'],['HALF_OPEN','warnc'],['','→'],['CLOSED','okc']])+note('Abrir/cerrar el breaker es <b>info</b> en el dashboard; no despierta a nadie.')},
+  ]
+},
+/* 5 ─────────────────────────────── */
+{
+  id:'backfill', nav:'Backfill con caps', blurb:'Carga ~1 min bajo 100 global / 10 por firma',
+  title:'Backfill, reconciliación y accepts: la ruta de ~1 min', sub:'Este es el único camino que llama al loader, siempre bajo los caps globales y por firma.',
+  vh:390, nw:180,
+  nodes:[
+    {id:'LIST',x:130,y:110,l:'Engagement system',sub:'listado de IDs (sin carga)'},
+    {id:'COV',x:130,y:300,l:'Coverage item',sub:'#COVERAGE'},
+    {id:'FQ',x:385,y:110,l:'Cola justa por firma',sub:'round-robin'},
+    {id:'KS',x:385,y:300,l:'Kill switch',sub:'OFF'},
+    {id:'LIM',x:635,y:110,l:'FairCapacityLimiter',sub:'10 / firma → 100'},
+    {id:'LOAD',x:870,y:110,l:'Loader downstream',sub:'~1 min / archivo'},
+    {id:'R',x:870,y:300,l:'Registry',sub:'source = BACKFILL'},
+  ],
+  edges:[['LIST','COV'],['LIST','FQ'],['FQ','LIM'],['KS','LIM'],['LIM','LOAD'],['LOAD','R']],
+  widget:capacityWidget,
+  steps:[
+    {k:'Semilla',t:'Contar sin cargar: UNKNOWN, nunca una suposición',hi:['LIST','COV'],set:{COV:{s:'warn',tag:'UNKNOWN'}},
+     p:[{f:'LIST',t:'COV',l:'IDs + product + market',k:'evt'}],
+     x:`<p>El engagement system puede listar IDs sin cargar archivos. Las filas no sembradas se cuentan en el coverage item y el dashboard muestra <b>“Checking N files”</b>, nunca una suposición.</p>`,
+     panel:stats([['800,000','archivos a sembrar'],['13,300 h','de cómputo (800k × 1 min)']])+note('Los archivos abiertos durante el backfill se siembran gratis vía eventos <code>loaded</code>.')},
+    {k:'Equidad',t:'Una cola por firma, round-robin',hi:['FQ'],set:{FQ:{s:'active'}},
+     p:[{f:'LIST',t:'FQ',l:'jobs por firma',k:'evt'}],
+     x:`<p>Sin equidad, la firma de 40,000 archivos acapararía todos los slots durante días. Con round-robin por firma, una firma mediana (40 archivos) termina en ~27 h.</p><p>👇 Mira la simulación: las firmas pequeñas terminan mientras la whale sigue avanzando.</p>`,
+     panel:stats([['~27 h','firma mediana con 100 slots'],['~2.8 días','firma más grande (cap 10)']])},
+    {k:'Orden de locks',t:'Primero permiso por firma, luego global',hi:['LIM'],set:{LIM:{s:'active'}},
+     p:[{f:'FQ',t:'LIM',l:'acquire firm → global',k:'evt'}],
+     x:`<p>Para evitar deadlocks: nunca retener un slot global mientras se espera uno por firma. Se liberan en orden inverso en un <code>finally</code>.</p>`,
+     panel:code(`firmPermit.acquire();          <span class="c">// 1. per-firm (≤10)</span>
+try {
+  globalPermit.acquire();      <span class="c">// 2. global (≤100)</span>
+  try { <span class="k">load</span>(engagement); }
+  finally { globalPermit.release(); }
+} finally { firmPermit.release(); }`)+note('Invariante (page si se viola): in-flight global ≤ 100 y por firma ≤ 10 → métrica <code>invariant.violation</code>.')},
+    {k:'Carga',t:'Carga de ~1 minuto: devuelve state_seq',hi:['LOAD'],set:{LOAD:{s:'warn'}},
+     p:[{f:'LIM',t:'LOAD',l:'load e-123 (~1 min)',k:'load'},{f:'LOAD',t:'R',l:'base v4 · state_seq 12',k:'write',d:1600}],
+     x:`<p>La carga rehidrata el archivo y devuelve su <code>state_seq</code> actual, de modo que la escritura también puede ser condicional.</p>`,
+     panel:row('LoadOutcome',{engagement:'e-123',base_version:'v4',state_seq:'12',snapshotEpoch:'9'})},
+    {k:'Escritura',t:'Escritura de backfill condicional',hi:['R'],set:{R:{s:'ok'},LOAD:{s:'idle'}},
+     p:[{f:'LOAD',t:'R',l:'write · source=BACKFILL',k:'write'}],
+     x:`<p>Una carga de 1 minuto puede solaparse con un hook nuevo o con un withdrawal:</p><p>• falla <code>state_seq</code> → el hook es más nuevo, la carga es stale y se descarta.<br>• falla solo la época → <b>re-derivar contra el grafo nuevo sin recargar</b> (acotado).</p>`,
+     panel:cond('(attribute_not_exists(state_seq) OR state_seq < :loaded)',true)+cond('AND (attribute_not_exists(graph_epoch) OR graph_epoch <= :snapshot)',true)},
+    {k:'Kill switch',t:'El equipo downstream pide parar',hi:['KS','LIM'],set:{KS:{s:'bad',sub:'ON'}},
+     p:[{f:'KS',t:'LIM',l:'stop acquiring',k:'bad'}],
+     x:`<p>Se consulta antes de adquirir slots: no se inician cargas nuevas y las que están en curso terminan. Pruébalo con el botón <b>Kill switch</b> de la simulación.</p>`,
+     panel:note('Los accepts de usuario tras un publish grande también pasan por esta cola con los mismos caps; la UI muestra “Applying…”.')},
+    {k:'Aritmética',t:'Cuánto dura el backfill',hi:[],set:{KS:{s:'idle',sub:'OFF'}},
+     x:`<p>800,000 × 1 min = 48M s ≈ 13,300 horas de cómputo. Con 100 cargas concurrentes (supuesto a confirmar con el equipo dueño) son ~5.6 días; ~\$1,300 una vez.</p>`,
+     panel:stats([['~11 d','50 slots'],['~5.6 d','100 slots (base)',1],['~2.8 d','200 slots']])+note('Reconciliación: muestra semanal del 0.5% (~4,000 cargas, 67 h) bajo los mismos caps.')},
+  ]
+},
+/* 6 ─────────────────────────────── */
+{
+  id:'summary', nav:'Resúmenes defendibles', blurb:'Generar, verificar, guardar en WORM',
+  title:'Generación y evaluación de resúmenes', sub:'El artefacto guardado es la evidencia, no el modelo: lo que se vio en marzo se defiende en noviembre.',
+  nw:170,
+  zones:[{x:20,y:30,w:225,h:485,l:'REGIÓN',k:'r'},{x:265,y:30,w:715,h:485,l:'GLOBAL · sin IDs',k:'g'}],
+  nodes:[
+    {id:'FAN',x:132,y:130,l:'Fan-out regional',sub:'pares distintos'},
+    {id:'UI',x:132,y:330,l:'UI regional',sub:'accept / decline'},
+    {id:'DED',x:395,y:130,l:'Dedup global',sub:'clave del par'},
+    {id:'GEN',x:630,y:130,l:'Model A · generador',sub:'solo el JSON diff'},
+    {id:'CHK',x:865,y:130,l:'Checks deterministas',sub:'sin LLM'},
+    {id:'JUD',x:865,y:330,l:'Model B · judge',sub:'otro modelo'},
+    {id:'WORM',x:630,y:330,l:'S3 Object Lock',sub:'WORM · sha256'},
+    {id:'FB',x:630,y:465,l:'Fallback estructurado',sub:'render determinista'},
+    {id:'AUD',x:395,y:465,l:'Revisión regulatoria',sub:'noviembre'},
+  ],
+  edges:[['FAN','DED'],['DED','GEN'],['GEN','CHK'],['CHK','JUD'],['JUD','WORM'],['CHK','FB'],['FB','WORM'],['WORM','UI'],['WORM','AUD']],
+  steps:[
+    {k:'Unidad',t:'Un resumen por par, compartido por todas las firmas',hi:['FAN','DED'],
+     p:[{f:'FAN',t:'DED',l:'(audit-ca, CA, v4, v7, fr-CA)',k:'safe'}],
+     x:`<p>La unidad no es la publicación ni el engagement: es <code>(product, market, from, to, locale)</code>. 800,000 engagements colapsan a 200–400 pares por semana.</p>`,
+     panel:stats([['~2,000×','menos llamadas que por engagement',1],['200–400','pares / semana'],['\$250–500','inferencia / mes']])},
+    {k:'Generación',t:'Model A ve solo el diff determinista',hi:['GEN'],set:{GEN:{s:'active'}},
+     p:[{f:'DED',t:'GEN',l:'JSON diff (~25k tokens)',k:'evt'}],
+     x:`<p>Nunca ve plantillas completas ni datos de firma. El texto de la plantilla dentro del diff es <b>dato</b>, no instrucción. Cada afirmación cita las rutas del diff de las que sale.</p>`,
+     panel:code(`"El umbral de materialidad baja de 5% a 3%"
+  <span class="c">cites: /sections/2.1/materiality/threshold</span>`)},
+    {k:'Checks',t:'Falla un check determinista → reintento',hi:['CHK','GEN'],set:{CHK:{s:'warn'}},
+     p:[{f:'GEN',t:'CHK',l:'borrador #1',k:'evt'},{f:'CHK',t:'GEN',l:'falla: §4.2 no cubierto',k:'bad',d:1400}],
+     x:`<p>Checks sin LLM: cobertura de cada ruta cambiada, rutas citadas existentes, números e identificadores verbatim, añadido/eliminado/modificado sin invertir. Hasta 2 reintentos con las razones del fallo.</p>`,
+     panel:list([['✓','cada ruta citada existe en el diff'],['✗','ruta cambiada §4.2 sin cubrir'],['✓','números verbatim (5% → 3%)'],['✓','added / removed / modified correctos']])},
+    {k:'Judge',t:'Pasa los checks y el judge independiente',hi:['CHK','JUD'],set:{CHK:{s:'ok'},GEN:{s:'idle'},JUD:{s:'ok'}},
+     p:[{f:'GEN',t:'CHK',l:'borrador #2 + razones',k:'evt'},{f:'CHK',t:'JUD',l:'checks ✓',k:'evt',d:1400}],
+     x:`<p>Model B, un modelo distinto, juzga omisiones, alucinaciones y énfasis engañoso. Se calibra cada mes con errores sembrados y un golden set de ~100 diffs corre en cada cambio de modelo o prompt.</p>`,
+     panel:list([['✓','cobertura completa'],['✓','judge: sin omisiones ni alucinaciones'],['✓','énfasis correcto']])},
+    {k:'Evidencia',t:'Se guarda en WORM con su registro de generación',hi:['WORM'],set:{WORM:{s:'ok'}},
+     p:[{f:'JUD',t:'WORM',l:'summary + generation record',k:'safe'}],
+     x:`<p>S3 Object Lock en modo compliance, claves direccionadas por contenido. Las correcciones crean objetos nuevos: nunca se sobrescribe.</p>`,
+     panel:row('Generation record',{diff_hash:'sha256:4be1…',model_id:'model-A@2026-10',prompt_version:'p-14',checks:'4/4 ✓',judge_verdict:'pass',attempt_count:'2',fallback_used:'false',output_hash:'sha256:9f2c…'})},
+    {k:'Marzo',t:'El usuario decide; se guarda el summary_hash',hi:['UI'],set:{UI:{s:'ok',tag:'marzo'}},
+     p:[{f:'WORM',t:'UI',l:'summary · sha256:9f2c…',k:'safe'}],
+     x:`<p>Accept/decline está deshabilitado hasta que el resumen esté adjunto. La vista regional añade las etiquetas “previously declined” en lectura. El evento de decisión guarda el <code>summary_hash</code> visto.</p>`,
+     panel:row('Evento accepted',{engagement:'e-981 (regional)',to_version:'v7',summary_hash:'sha256:9f2c…',at:'2026-03-12'},['summary_hash'])},
+    {k:'Noviembre',t:'La revisión regulatoria obtiene el texto exacto',hi:['AUD','WORM'],set:{AUD:{s:'ok',tag:'noviembre'}},
+     p:[{f:'WORM',t:'AUD',l:'texto exacto + evidencia',k:'safe'}],
+     x:`<p>Un LLM no es reproducible ni con temperature 0: <b>no se regenera</b>. Se recupera por hash el texto exacto que se mostró y la prueba de que pasó checks y judge.</p>`,
+     panel:list([['✓','qué texto vio el usuario (summary_hash)'],['✓','de qué diff salió (diff_hash)'],['✓','qué modelo, prompt y checks'],['✓','inmutable desde marzo']])},
+    {k:'Fallback',t:'Si fallan los checks o salta el cap de gasto',hi:['CHK','FB'],set:{FB:{s:'warn'}},
+     p:[{f:'CHK',t:'FB',l:'checks fallan / cap de gasto',k:'bad'},{f:'FB',t:'WORM',l:'render estructurado',k:'safe',d:1400}],
+     x:`<p>Se publica un render determinista del diff y se alerta al equipo de contenido. El usuario <b>nunca</b> ve un resumen sin verificar y siempre recibe uno correcto; solo se pierde pulido.</p>`,
+     panel:stats([['80%','del cap diario → ticket'],['100%','→ fallback estructurado']])},
+  ]
+},
+/* 7 ─────────────────────────────── */
+{
+  id:'migration', nav:'Migración en vivo', blurb:'Sin ventana de mantenimiento',
+  title:'Migración en vivo, sin ventana de mantenimiento', sub:'El registry es puramente aditivo: el rollback es apagar un flag.',
+  vh:430, nw:180,
+  nodes:[
+    {id:'P1',x:130,y:140,l:'1 · Hooks dark',sub:'outbox sin consumidor UI'},
+    {id:'P2',x:375,y:140,l:'2 · Shadow mode',sub:'registry se llena'},
+    {id:'P3',x:620,y:140,l:'3 · Backfill',sub:'throttled · kill switch'},
+    {id:'P4',x:865,y:140,l:'4 · Flag por firma',sub:'cobertura 100%'},
+    {id:'REC',x:620,y:330,l:'Reconciliación',sub:'0.5% / semana'},
+    {id:'RB',x:865,y:330,l:'Rollback',sub:'apagar el flag'},
+  ],
+  edges:[['P1','P2'],['P2','P3'],['P3','P4'],['REC','P4'],['P4','RB',{dash:1}]],
+  steps:[
+    {k:'Fase 1',t:'Enviar los hooks “dark”',hi:['P1'],set:{P1:{s:'active'}},
+     x:`<p>Se despliegan los hooks del outbox en el engagement system y en el Template DB, sin que nada en la UI cambie.</p>`,
+     panel:bar('0%','0%','cobertura del registry (ilustrativo)','0%')},
+    {k:'Fase 2',t:'Shadow mode: el registry se llena solo',hi:['P2'],set:{P1:{s:'ok'},P2:{s:'active'}},
+     p:[{f:'P1',t:'P2',l:'created · accepted · loaded …',k:'evt'}],
+     x:`<p>Hooks y eventos <code>loaded</code> pueblan el registry mientras la UI sigue igual. Cada archivo que alguien abre se siembra gratis.</p>`,
+     panel:bar('0%','35%','cobertura del registry (ilustrativo)','~35%')},
+    {k:'Fase 3',t:'Backfill throttled fuera de pico',hi:['P3'],set:{P2:{s:'ok'},P3:{s:'active'}},
+     p:[{f:'P2',t:'P3',l:'filas restantes',k:'load'}],
+     x:`<p>Se cargan las filas restantes bajo los caps (100 global / 10 por firma), con kill switch. ~5.6 días con 100 slots.</p>`,
+     panel:bar('35%','100%','cobertura del registry (ilustrativo)','100%','g')},
+    {k:'Fase 4',t:'Activar por firma cuando el drift pasa',hi:['P4','REC'],set:{P3:{s:'ok'},REC:{s:'ok'},P4:{s:'ok',tag:'ON'}},
+     p:[{f:'REC',t:'P4',l:'drift < 0.01%',k:'safe'}],
+     x:`<p>Flag por firma solo cuando la cobertura es 100% y pasa una muestra de drift. Con 0 errores en n muestras, la cota superior al 95% es ≈ 3/n: por eso la ventana es de 8 semanas.</p>`,
+     panel:stats([['32,000','muestras en 8 semanas'],['≈ 0.009%','cota superior (3/n)',1],['< 0.01%','SLO de drift']])},
+    {k:'Rollback',t:'Si algo sale mal: apagar el flag',hi:['RB'],set:{RB:{s:'warn'}},
+     p:[{f:'P4',t:'RB',l:'flag OFF',k:'bad'}],
+     x:`<p>El registry es aditivo: no reemplaza nada del sistema existente. Revertir es apagar el flag de la firma; el resto sigue funcionando.</p>`,
+     panel:list([['✓','sin ventana de mantenimiento'],['✓','sin migración destructiva'],['✓','rollback por firma, inmediato']])},
+  ]
+},
+];
+
+/* ---------- engine ---------- */
+const NS='http://www.w3.org/2000/svg';
+const $=id=>document.getElementById(id);
+const stage=$('stage');
+const cur={scene:0,step:0,playing:false,speed:1};
+let SC, nodeEls={}, nodeDefs={}, layers={}, timers=[], token=0, widget=null;
+
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
+function later(fn,ms){timers.push(setTimeout(fn,ms))}
+function clearTimers(){timers.forEach(clearTimeout);timers=[]}
+
+function clipPts(a,b){
+  const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len;
+  const ta=Math.min(a.w/2/Math.abs(ux||1e-9),a.h/2/Math.abs(uy||1e-9));
+  const tb=Math.min(b.w/2/Math.abs(ux||1e-9),b.h/2/Math.abs(uy||1e-9));
+  return [{x:a.x+ux*(ta+3),y:a.y+uy*(ta+3)},{x:b.x-ux*(tb+6),y:b.y-uy*(tb+6)}];
+}
+
+function buildNav(){
+  $('nav').innerHTML=SCENES.map((s,i)=>`<button role="tab" data-i="${i}" title="${s.blurb}"><span class="n">${i+1}</span>${s.nav}</button>`).join('');
+  $('nav').querySelectorAll('button').forEach(b=>b.onclick=()=>{mountScene(+b.dataset.i)});
+}
+
+function mountScene(i){
+  clearTimers();token++;
+  if(widget){widget.destroy();widget=null}
+  cur.scene=i;cur.step=0;SC=SCENES[i];
+  const vh=SC.vh||540;stage.setAttribute('viewBox',`0 0 1000 ${vh}`);
+  stage.innerHTML='';nodeEls={};nodeDefs={};
+  const defs=el('defs',{},stage);
+  const m=el('marker',{id:'arr',viewBox:'0 0 10 10',refX:'8',refY:'5',markerWidth:'7',markerHeight:'7',orient:'auto-start-reverse'},defs);
+  el('path',{d:'M0,0 L10,5 L0,10 z'},m);
+  layers={z:el('g',{},stage),e:el('g',{},stage),n:el('g',{},stage),p:el('g',{},stage)};
+  (SC.zones||[]).forEach(z=>{el('rect',{x:z.x,y:z.y,width:z.w,height:z.h,rx:16,class:'zone '+(z.k||'n')},layers.z);const t=el('text',{x:z.x+16,y:z.y+22,class:'zone-label'},layers.z);t.textContent=z.l});
+  (SC.lines||[]).forEach(l=>{el('line',{x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,class:'boundary'},layers.z);const t=el('text',{x:l.x2-8,y:l.y1-6,class:'boundary-label','text-anchor':'end'},layers.z);t.textContent=l.l});
+  const W=SC.nw||170,H=SC.nh||58;
+  SC.nodes.forEach(n=>{nodeDefs[n.id]={...n,w:n.w||W,h:n.h||H}});
+  (SC.edges||[]).forEach(([a,b,o])=>{const[p,q]=clipPts(nodeDefs[a],nodeDefs[b]);el('path',{d:`M${p.x},${p.y} L${q.x},${q.y}`,class:'edge'+(o&&o.dash?' dash':''),'marker-end':'url(#arr)'},layers.e)});
+  SC.nodes.forEach(n=>{
+    const d=nodeDefs[n.id];
+    const g=el('g',{transform:`translate(${d.x},${d.y})`,class:'node'},layers.n);
+    const body=el('g',{class:'body'},g);
+    el('rect',{class:'box',x:-d.w/2,y:-d.h/2,width:d.w,height:d.h,rx:12},body);
+    const t=el('text',{class:'t',y:d.sub?-3:5},body);t.textContent=d.l;
+    const s=el('text',{class:'s',y:15},body);s.textContent=d.sub||'';
+    const tag=el('g',{class:'tag',transform:`translate(0,${-d.h/2})`},g);
+    const tr=el('rect',{y:-10,height:20,rx:10},tag);const tt=el('text',{y:4},tag);
+    nodeEls[n.id]={g,t,s,tag,tr,tt,d};
+  });
+  const wh=$('widget');
+  if(SC.widget){wh.hidden=false;widget=SC.widget(wh)}else{wh.hidden=true;wh.innerHTML=''}
+  $('sTitle').textContent=SC.title;$('sSub').textContent=SC.sub;
+  document.querySelectorAll('#nav button').forEach((b,j)=>{b.classList.toggle('on',j===i);b.setAttribute('aria-selected',j===i);if(j===i)b.scrollIntoView({block:'nearest',inline:'nearest'})});
+  $('dots').innerHTML=SC.steps.map((_,j)=>`<button data-j="${j}" title="Paso ${j+1}"></button>`).join('');
+  $('dots').querySelectorAll('button').forEach(b=>b.onclick=()=>{cur.step=+b.dataset.j;applyStep()});
+  applyStep();
+}
+
+function computeState(){
+  const st={};
+  SC.nodes.forEach(n=>st[n.id]={s:n.s||'idle',sub:n.sub||'',tag:n.tag||''});
+  for(let j=0;j<=cur.step;j++){const set=SC.steps[j].set||{};for(const k in set){const v=typeof set[k]==='string'?{s:set[k]}:set[k];Object.assign(st[k],v)}}
+  return st;
+}
+
+function applyStep(){
+  clearTimers();const tok=++token;layers.p.innerHTML='';
+  const step=SC.steps[cur.step],st=computeState(),hi=new Set(step.hi||[]);
+  for(const id in nodeEls){
+    const e=nodeEls[id],s=st[id];
+    e.g.setAttribute('class',`node ${s.s}${hi.has(id)&&s.s!=='hidden'?' focus':''}`);
+    e.s.textContent=s.sub;e.t.setAttribute('y',s.sub?-3:5);
+    e.tt.textContent=s.tag;
+    if(s.tag){const w=e.tt.getComputedTextLength()+18;e.tr.setAttribute('x',-w/2);e.tr.setAttribute('width',w);e.tag.style.opacity=1}else e.tag.style.opacity=0;
+  }
+  $('nStep').textContent=`${step.k} · paso ${cur.step+1} de ${SC.steps.length}`;
+  $('nTitle').textContent=step.t;
+  const nt=$('nText');nt.innerHTML=step.x;nt.classList.remove('fade-in');void nt.offsetWidth;nt.classList.add('fade-in');
+  let pj=cur.step;while(pj>0&&SC.steps[pj].panel===undefined)pj--;
+  const pn=$('panel');pn.innerHTML=SC.steps[pj].panel||'';pn.classList.remove('fade-in');void pn.offsetWidth;pn.classList.add('fade-in');
+  $('dots').querySelectorAll('button').forEach((b,j)=>{b.className=j===cur.step?'on':j<cur.step?'done':''});
+  const sp=cur.speed,dur=1250/sp;let end=0;
+  (step.p||[]).forEach(p=>{const d=(p.d||0)/sp;end=Math.max(end,d+dur);later(()=>fly(p,dur,tok),d)});
+  if(cur.playing){const words=(step.x||'').replace(/<[^>]+>/g,'').split(/\s+/).length;later(next,Math.max(end+2200/sp,(2600+words*190)/sp))}
+}
+
+function fly(p,dur,tok){
+  if(tok!==token)return;
+  const a=nodeDefs[p.f],b=nodeDefs[p.t];if(!a||!b)return;
+  const [s,e]=clipPts(a,b);
+  const g=el('g',{class:`pkt k-${p.k||'evt'}`},layers.p);
+  const halo=el('circle',{r:12,class:'halo'},g);
+  el('circle',{r:6},g);
+  const lg=el('g',{},g);
+  const pill=el('rect',{class:'pill',height:20,rx:10,y:-32},lg);
+  const tx=el('text',{y:-18,'text-anchor':'middle'},lg);tx.textContent=p.l||'';
+  const w=tx.getComputedTextLength()+16;pill.setAttribute('x',-w/2);pill.setAttribute('width',w);
+  const t0=performance.now();
+  const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+  function frame(now){
+    if(tok!==token){g.remove();return}
+    const t=Math.min(1,(now-t0)/dur),k=ease(t);
+    let x=s.x+(e.x-s.x)*k,y=s.y+(e.y-s.y)*k;
+    const lx=Math.max(w/2+4,Math.min(1000-w/2-4,x))-x;
+    g.setAttribute('transform',`translate(${x},${y})`);lg.setAttribute('transform',`translate(${lx},0)`);
+    halo.setAttribute('r',10+4*Math.sin(now/120));
+    if(t<1)requestAnimationFrame(frame);
+    else{
+      const ne=nodeEls[p.t];ne.g.classList.remove('pulse');void ne.g.getBBox();ne.g.classList.add('pulse');
+      later(()=>{g.style.transition='opacity .5s';g.style.opacity=0;later(()=>g.remove(),520)},1100/cur.speed);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function next(){
+  if(cur.step<SC.steps.length-1){cur.step++;applyStep()}
+  else if(cur.playing&&cur.scene<SCENES.length-1){mountScene(cur.scene+1)}
+  else setPlaying(false);
+}
+function prev(){if(cur.step>0){cur.step--;applyStep()}else if(cur.scene>0){mountScene(cur.scene-1);cur.step=SC.steps.length-1;applyStep()}}
+function setPlaying(v){cur.playing=v;$('play').textContent=v?'❚❚ Pausa':'▶ Play';applyStep()}
+
+$('play').onclick=()=>setPlaying(!cur.playing);
+$('next').onclick=()=>{if(cur.step<SC.steps.length-1){cur.step++;applyStep()}else if(cur.scene<SCENES.length-1)mountScene(cur.scene+1)};
+$('prev').onclick=prev;
+$('replay').onclick=applyStep;
+$('speed').onchange=e=>{cur.speed=+e.target.value};
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='SELECT')return;
+  if(e.key==='ArrowRight'){e.preventDefault();$('next').click()}
+  else if(e.key==='ArrowLeft'){e.preventDefault();prev()}
+  else if(e.key===' '){e.preventDefault();setPlaying(!cur.playing)}
+});
+$('theme').onclick=()=>{
+  const r=document.documentElement,dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+  r.dataset.theme=dark?'light':'dark';
+};
+
+/* ---------- capacity simulation widget ---------- */
+function capacityWidget(host){
+  const GLOBAL=100,PER=10;
+  host.innerHTML=`<div class="cap">
+    <div class="cap-h"><h3>Simulación: 1 firma whale (800) + 10 firmas pequeñas (20 c/u)</h3><small id="capT"></small></div>
+    <div class="cap-top">
+      <div><div class="cap-grid" id="capGrid"></div><small style="color:var(--muted);display:block;margin-top:6px">100 slots globales · <span style="color:var(--amber)">■</span> whale <span style="color:var(--accent)">■</span> pequeñas <span style="color:var(--green)">■</span> nuevas</small></div>
+      <div>
+        <div class="inv" id="capInv"></div>
+        <div class="cap-firms" id="capFirms"></div>
+      </div>
+    </div>
+    <div class="cap-ctl">
+      <button class="icon-btn kill" id="capKill">⏻ Kill switch</button>
+      <button class="icon-btn" id="capAdd">＋ Llega una firma pequeña</button>
+      <button class="icon-btn" id="capPause">❚❚ Pausar sim</button>
+      <button class="icon-btn" id="capReset">↺ Reiniciar</button>
+    </div></div>`;
+  const grid=host.querySelector('#capGrid');
+  const slotEls=Array.from({length:GLOBAL},()=>{const d=document.createElement('div');grid.appendChild(d);return d});
+  let firms,slots,tick,rr,killed,paused,maxG,maxF,seed,timer,extra;
+  function rnd(){seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff}
+  function mk(id,total,kind){return{id,total,pending:total,inflight:0,done:0,kind,finishedAt:null}}
+  function reset(){
+    firms=[mk('F-whale',800,'w')];for(let i=1;i<=10;i++)firms.push(mk('F-'+String(i).padStart(3,'0'),20,'s'));
+    slots=Array(GLOBAL).fill(null);tick=0;rr=0;killed=false;maxG=0;maxF=0;seed=7;extra=0;
+    host.querySelector('#capKill').classList.remove('on');host.querySelector('#capKill').textContent='⏻ Kill switch';
+    renderFirms(true);render();
+  }
+  function inflightG(){return slots.filter(Boolean).length}
+  function step(){
+    tick++;
+    slots.forEach((s,i)=>{if(s&&--s.left<=0){s.f.inflight--;s.f.done++;if(!s.f.pending&&!s.f.inflight)s.f.finishedAt=tick;slots[i]=null}});
+    if(!killed){
+      let progress=true;
+      while(progress){
+        progress=false;
+        for(let k=0;k<firms.length;k++){
+          const f=firms[(rr+k)%firms.length];
+          if(inflightG()>=GLOBAL)break;
+          if(f.pending>0&&f.inflight<PER){            // per-firm first, then global
+            const idx=slots.indexOf(null);if(idx<0)break;
+            f.pending--;f.inflight++;slots[idx]={f,left:6+Math.floor(rnd()*4)};progress=true;
+          }
+        }
+      }
+      rr=(rr+1)%firms.length;
+    }
+    maxG=Math.max(maxG,inflightG());firms.forEach(f=>maxF=Math.max(maxF,f.inflight));
+    render();
+  }
+  function renderFirms(full){
+    const box=host.querySelector('#capFirms');
+    if(full||box.children.length!==firms.length){
+      box.innerHTML=firms.map(f=>`<div class="firm ${f.kind==='w'?'whale':f.kind==='n'?'newf':''}"><div class="top"><b>${f.id}</b><span></span></div><div class="bar"><i></i></div><div class="cap10">${'<span></span>'.repeat(PER)}</div></div>`).join('');
+    }
+  }
+  function render(){
+    renderFirms(false);
+    slots.forEach((s,i)=>{slotEls[i].className=s?s.f.kind:''});
+    const box=host.querySelector('#capFirms');
+    firms.forEach((f,i)=>{
+      const c=box.children[i];
+      c.querySelector('.top span').textContent=f.finishedAt?`✓ ${(f.finishedAt*8/60).toFixed(1)} min`:`${f.done}/${f.total} · ${f.inflight} en curso`;
+      c.querySelector('.bar i').style.width=(f.done/f.total*100)+'%';
+      c.querySelectorAll('.cap10 span').forEach((sp,j)=>sp.className=j<f.inflight?'on':'');
+    });
+    const g=inflightG();
+    host.querySelector('#capInv').innerHTML=chips([[`in-flight global ${g}/${GLOBAL}`,g?'on':''],[`máx. global ${maxG} ≤ ${GLOBAL} ${maxG<=GLOBAL?'✓':'✗'}`,maxG<=GLOBAL?'okc':'badc'],[`máx. por firma ${maxF} ≤ ${PER} ${maxF<=PER?'✓':'✗'}`,maxF<=PER?'okc':'badc']].concat(killed?[['KILL SWITCH ACTIVO','badc']]:[]));
+    host.querySelector('#capT').textContent=`tiempo simulado ≈ ${(tick*8/60).toFixed(1)} min · cada carga ≈ 1 min`;
+  }
+  function loop(){timer=setTimeout(()=>{if(!paused)step();loop()},120/cur.speed)}
+  host.querySelector('#capKill').onclick=e=>{killed=!killed;e.currentTarget.classList.toggle('on',killed);e.currentTarget.textContent=killed?'⏻ Kill switch (ON)':'⏻ Kill switch';render()};
+  host.querySelector('#capAdd').onclick=()=>{extra++;firms.push(mk('F-new'+extra,20,'n'));renderFirms(true);render()};
+  host.querySelector('#capPause').onclick=e=>{paused=!paused;e.currentTarget.textContent=paused?'▶ Reanudar sim':'❚❚ Pausar sim'};
+  host.querySelector('#capReset').onclick=reset;
+  paused=false;reset();loop();
+  return{destroy(){clearTimeout(timer)}};
+}
+
+buildNav();
+mountScene(0);
+</script>
+</body>
+</html>
